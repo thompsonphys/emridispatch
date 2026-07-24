@@ -1,0 +1,63 @@
+# Minimal eryn-backend configuration (`pip install emridispatch[eryn]`).
+# The eryn knobs live in the sampler.eryn subsection (the impulse subsection is
+# simply omitted). Raw output is <outdir>/eryn_chain.h5 (resume appends);
+# postprocess with `emridispatch-postprocess <outdir>`.
+#     emridispatch eryn_config.yaml
+
+injection:
+  mass_1: 1.0e+6   # note the +: YAML needs a signed exponent to parse as float
+  mass_2: 10.0
+  a: 0.0
+  p: 10.0
+  e: 0.1
+  x: 1.0           # fixed (equatorial model) -- not sampled
+  q_k: 1.0
+  phi_k: 1.5707963267948966
+  q_s: 1.0
+  phi_s: 1.5707963267948966
+  luminosity_distance: 1.0
+  phi_phi: 1.5707963267948966
+  phi_theta: 0.0               # fixed -- not sampled
+  phi_r: 1.5707963267948966
+
+data:
+  response: lisatools   # lisatools | toy | any registered response model
+  duration: 0.1    # years
+  delta_t: 10.0    # seconds
+  inj_snr: 30.0    # rescales distance to this SNR (null: use distance verbatim)
+  channels: [A, E]
+
+sampler:
+  backend: eryn
+  nsamples: 100       # stored steps per invocation (resume appends more)
+  eryn:
+    nwalkers: 24        # ensemble walkers per temperature rung
+    ntemps: 1           # 1 -> untempered; >1 builds an eryn ladder
+    Tmax: null          # top ladder temperature (null -> eryn default)
+    adaptive_temps: false
+    stop_adaptation: -1 # step to freeze ladder adaptation (-1: never)
+    burn: 0             # in-sampler burn-in (not stored); skipped on resume
+    thin_by: 1
+    progress: false
+    start_spread: 1.0   # walker scatter around the start, in proposal sigmas
+
+# rectangular box prior: bounds = truth +/- box_scale*delta
+# (works with any backend; swap for fisher: auto to size the box from a Fisher).
+prior:
+  fisher: deltas
+  box_scale: 25.0
+  deltas:
+    mass_1: 1.0
+    mass_2: 1.0e-4
+    a: 1.0e-5
+    p: 1.0e-6
+    e: 1.0e-6
+    luminosity_distance: 0.05
+
+reparam:
+  mode: auto       # auto | grid | "off"  (quote "off": bare off is a YAML boolean)
+  idx: [0, 1, 2, 3, 4, 5]  # input parameter array indices included in the reparam
+
+run:
+  seed: 1245
+  outdir: ./output_chains_eryn

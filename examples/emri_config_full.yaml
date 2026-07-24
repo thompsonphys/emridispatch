@@ -1,0 +1,199 @@
+# Annotated reference configuration for emridispatch.
+# Loaded by emridispatch.config.load_config(). Everything is set here. Run with:
+#     emridispatch emri_config.yaml
+#
+# Only injection/data/reparam/run are required sections; every other key has a
+# default (shown here) merged in at load time.
+
+# --------------------------------------------------------------------------
+# Injection: the "true" source. All keys the response model needs, including
+# the fixed x (inclination) and phi_theta (polar phase).
+# --------------------------------------------------------------------------
+injection:
+  mass_1: 1.0e+6   # note the +: YAML needs a signed exponent to parse as float
+  mass_2: 10.0
+  a: 0.0
+  p: 10.0
+  e: 0.1
+  x: 1.0
+  q_k: 1.0
+  phi_k: 1.5707963267948966   # pi/2  (azimuthal spin angle)
+  q_s: 1.0
+  phi_s: 1.5707963267948966   # pi/2  (azimuthal sky angle)
+  luminosity_distance: 1.0
+  phi_phi: 1.5707963267948966    # pi/2  (initial azimuthal orbital phase)
+  phi_theta: 0.0                 # (initial polar phase; fixed, equatorial)
+  phi_r: 1.5707963267948966      # pi/2  (initial radial orbital phase)
+
+# --------------------------------------------------------------------------
+# Data / likelihood
+# response selects the injection/likelihood implementation:
+#   lisatools - EMRI+TDI matched filter via lisa-analysis-tools + FEW
+#               (requires `pip install emridispatch[lisatools]`)
+#   toy       - dependency-free Gaussian toy likelihood (structure testing only)
+# Other TDI codes can register via emridispatch.response.register_model().
+# --------------------------------------------------------------------------
+data:
+  response: lisatools
+  duration: 0.3     # years
+  delta_t: 10.0     # seconds
+  inj_snr: 30.0     # null -> skip SNR calibration (distance stays as injected)
+  channels: [A, E]
+  add_noise: false  # add a Gaussian noise realization drawn from the PSD
+  noise_seed: 0     # dedicated noise seed -- independent of run.seed
+
+# --------------------------------------------------------------------------
+# Sampler: shared knobs at the top level, backend-specific knobs in the
+# impulse:/eryn: subsections (only the selected backend's subsection is read;
+# further backends plug in via emridispatch.backends.register_backend).
+#   impulse - PT-MCMC, temperature ladder + mode jumps; chain_N.txt output
+#   eryn    - PT ensemble sampler (`pip install emridispatch[eryn]`);
+#             eryn_chain.h5 output (resume appends)
+# --------------------------------------------------------------------------
+sampler:
+  backend: impulse
+  nsamples: 10000        # stored steps per invocation (all backends)
+  # Cold-chain start dispersion (multi-chain R-hat -- see emridispatch-multichain).
+  #   truth  - start at the injection (systematics/recovery mode; single-chain default)
+  #   prior  - full 12-D start drawn uniformly from the prior box (blind-PE dispersion)
+  #   fisher - truth + start_jitter*Fisher-scale Gaussian (mild; angles barely cross modes)
+  start_mode: truth      # truth | prior | fisher
+  start_jitter: 5.0      # fisher-mode dispersion in Fisher sigmas
+
+  impulse:
+    threads: 1           # MUST be 1 using FEW: FEW's generator is not thread-safe
+    cov_update: 200      # adapt proposal covariance every N steps
+    save_freq: 200       # flush chains / checkpoint every N steps.
+                         # Currently must be >= cov_update using impulse
+    # Temperature ladder: DENSE at low T, coarse above. The inf chain (prior)
+    # is appended as the top rung automatically.
+    # Total rungs = ntemps_low + ntemps_high + 1.
+    # adapt: impulse runs Vousden+2016 ladder adaptation every swap.
+    # adapt_nu/adapt_t0 tune the scheme when adapt: true.
+    ladder:
+      max_temp: 1000.0
+      t_split: 25.0     # barrier-melt scale: dense below, coarse above
+      ntemps_low: 20    # rungs in [1, t_split]
+      ntemps_high: 6    # rungs in (t_split, max_temp]
+      adapt: false      # Vousden ladder adaptation (fights the EMRI phase transition -> off)
+      adapt_nu: 100     # adaptation timescale when adapt: true (larger = weaker)
+      adapt_t0: 100     # adaptation lag when adapt: true
+    # Mode-jump strategy for crossing the intrinsic mode barriers (see
+    # emridispatch/backends/impulse/mode_jumps.py). All options learn the modes
+    # online from a shared cross-chain pool. method:
+    #   none       - local proposals + PT swaps only (baseline)
+    #   popde      - cross-chain population-DE jump (robust, symmetric)
+    #   gmm        - adaptive GMM, covariance-aware (needs emridispatch[gmm])
+    #   popde+gmm  - both custom jumps in the mix
+    mode_jump:
+      method: popde
+      weight: 25.0    # weight per custom mode-jump proposal
+
+  # eryn subsection (read when backend: eryn; all optional, defaults shown):
+  # eryn:
+  #   nwalkers: 32        # ensemble walkers per temperature rung
+  #   ntemps: 1           # 1 -> untempered; >1 builds an eryn ladder
+  #   Tmax: null          # top ladder temperature (.inf allowed)
+  #   adaptive_temps: true
+  #   stop_adaptation: -1 # step to freeze ladder adaptation (-1: never)
+  #   burn: 0             # in-sampler burn-in (not stored); skipped on resume
+  #   thin_by: 1
+  #   progress: false
+  #   start_spread: 1.0   # walker scatter around the start, in proposal sigmas
+  #   move: stretch       # Eryn only supports stretch moves for EMRIs
+
+# --------------------------------------------------------------------------
+# Prior box + Fisher provider.
+# box_scale: intrinsic/distance half-width in Fisher sigmas. 3 = tight recovery
+# box; raise deliberately to stress the sampler over a wider volume. A cached
+# prior_bounds.npz re-derives its box at the new scale on load (no Fisher re-run).
+# fisher: how the Fisher sigmas/covariance are obtained:
+#   auto   - manual if sigmas/covariance_file given, else StableEMRIFisher if
+#            installed (`pip install emridispatch[fisher]`), else a loud heuristic
+#   sef    - StableEMRIFisher, error if missing
+#   manual - use prior.sigmas and/or prior.covariance_file below
+#   deltas - rectangular box from prior.deltas half-widths: bounds =
+#            truth +/- box_scale*delta
+#   none   - heuristic placeholder widths
+# angle_sigma: start scale (rad) for the 6 angle/phase proposals.
+# fisher_use_gpu: run the one-off Fisher on GPU (SEF needs ~10.6 GB) or CPU
+# (null -> provider decides).
+# periodic_2pi_indices: sampling-vector indices that are 2*pi-periodic
+# (azimuthal sky angle phi_s=7, azimuthal spin angle phi_k=9, initial phases
+# phi_phi=10, phi_r=11). The polar angles (6, 8) are bounded/reflected, not
+# wrapped; intrinsics/distance (0..5) are non-angular.
+# --------------------------------------------------------------------------
+prior:
+  box_scale: 3.0
+  fisher: auto
+  angle_sigma: 0.05
+  fisher_use_gpu: false
+  periodic_2pi_indices: [7, 9, 10, 11]
+  # sigmas:                      # manual 1-sigma errors (linear coordinates)
+  #   mass_1: 2.0
+  #   mass_2: 1.0e-4
+  #   a: 1.0e-5
+  #   p: 1.0e-5
+  #   e: 1.0e-5
+  #   luminosity_distance: 0.05
+  # covariance_file: fisher_cov.npz   # npz with keys: cov (6x6) [, order]
+  # deltas:                      # fisher: deltas half-widths (linear coords);
+  #   mass_1: 1.0                # box = truth +/- box_scale*delta, angles keep
+  #   mass_2: 1.0e-4             # their full physical ranges
+  #   a: 1.0e-5
+  #   p: 1.0e-6
+  #   e: 1.0e-6
+  #   luminosity_distance: 0.05
+
+# --------------------------------------------------------------------------
+# Per-parameter prior overrides (optional). By default every parameter is
+# uniform over the Fisher box (intrinsics) or its full physical range (angles,
+# with the azimuthal ones periodic). Override any parameter by sampling-vector
+# name; min/max default to that parameter's box bounds.
+# Types: uniform | loguniform | gaussian (mu, sigma) | sine | cosine |
+#        periodic_uniform
+# --------------------------------------------------------------------------
+# priors:
+#   dist: {type: loguniform, min: 0.5, max: 20.0}
+#   q_s:  {type: sine}
+#   q_k:  {type: sine}
+
+# --------------------------------------------------------------------------
+# Decorrelating reparametrization of the intrinsic block (emridispatch/reparam.py).
+# mode:
+#   auto -> whiten the block from the injection's FISHER covariance + truth centre
+#   grid -> like auto, but whiten in FEW's kerrecceq grid coordinates
+#           (needs FEW installed; nonlinear -> prior carries the Jacobian term)
+#   off  -> identity: sample in physical coords
+# idx = intrinsic block in the 12-D vector: ln m1, ln m2, a, p, e, distance.
+# --------------------------------------------------------------------------
+reparam:
+  mode: auto      # auto | grid | "off"  (quote "off": bare off is a YAML boolean)
+  idx: [0, 1, 2, 3, 4, 5]
+
+# --------------------------------------------------------------------------
+# Run identity: RNG seed + output directory. Everything else lives in its
+# owning section (sampler/prior/reparam/logging).
+# --------------------------------------------------------------------------
+run:
+  seed: 1245
+  outdir: ./output_chains
+
+# --------------------------------------------------------------------------
+# Logging: console + <outdir>/<file>. level overridable with --log-level.
+# --------------------------------------------------------------------------
+logging:
+  level: INFO
+  file: run.log          # null disables the file handler
+
+# --------------------------------------------------------------------------
+# P-P (posterior-calibration) harness -- emridispatch-pp. N runs with truths drawn
+# uniformly from ONE fixed fiducial prior box (built at prior.box_scale around
+# the injection: block above); noise on, SNR calibration off (free distance).
+# --------------------------------------------------------------------------
+pp:
+  nruns: 50
+  outroot: ./chains_pp
+  draw_seed: 7777    # truth draws; run i draws with draw_seed + i
+  nsamples: 10000    # per-run chain length (overrides sampler.nsamples)
+  burn_frac: 0.25    # fraction of each chain dropped before rank computation

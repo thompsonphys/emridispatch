@@ -1,0 +1,58 @@
+# Minimal impulse-backend configuration.
+# Only injection/data/reparam/run are required sections; everything else shown
+# here overrides a default. The annotated reference (emri_config_full.yaml)
+# documents every optional block and knob (sampler backends, fisher provider,
+# per-parameter priors, pp, noise, ladder adaptation, start dispersion,
+# logging); omit what you don't use.
+#     emridispatch my_config.yaml
+
+injection:
+  mass_1: 1.0e+6   # note the +: YAML needs a signed exponent to parse as float
+  mass_2: 10.0
+  a: 0.0
+  p: 10.0
+  e: 0.1
+  x: 1.0           # fixed (equatorial model) -- not sampled
+  q_k: 1.0
+  phi_k: 1.5707963267948966
+  q_s: 1.0
+  phi_s: 1.5707963267948966
+  luminosity_distance: 1.0
+  phi_phi: 1.5707963267948966
+  phi_theta: 0.0               # fixed -- not sampled
+  phi_r: 1.5707963267948966
+
+data:
+  response: lisatools   # lisatools | toy | any registered response model
+  duration: 0.1    # years
+  delta_t: 10.0    # seconds
+  inj_snr: 30.0    # rescales distance to this SNR (null: use distance verbatim)
+  channels: [A, E]
+
+sampler:
+  backend: impulse
+  nsamples: 200
+  impulse:
+    threads: 1       # MUST be 1 using FEW: FEW's generator is not thread-safe
+    cov_update: 200
+    save_freq: 200   # MUST be >= cov_update (ShortChain ring is save_freq deep)
+    ladder:
+      max_temp: 1000.0
+      t_split: 25.0  # low/high temp split, dense rungs below this temperature
+      ntemps_low: 20
+      ntemps_high: 6
+    mode_jump:
+      method: popde  # additional jump proposal options: none | popde | gmm | popde+gmm
+      weight: 25.0
+
+prior:
+  angle_sigma: 0.05
+  fisher_use_gpu: false
+
+reparam:
+  mode: auto       # auto | grid | "off"  (quote "off": bare off is a YAML boolean)
+  idx: [0, 1, 2, 3, 4, 5]  # input parameter array indices included in the reparam
+
+run:
+  seed: 1245
+  outdir: ./output_chains
