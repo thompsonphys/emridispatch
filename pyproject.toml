@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "emridispatch"
+version = "0.1.0"
+description = "EMRI parameter estimation: modular PE pipeline with pluggable samplers, TDI/response backends, Fisher providers, and flexible priors"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Jonathan Thompson" }]
+dependencies = [
+    "numpy",
+    "scipy",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+# Sampler backends (each backend is an extra; core is sampler-free).
+impulse = ["impulse-mcmc"]
+eryn = ["eryn"]
+# TDI / waveform / PSD response via lisa-analysis-tools + FastEMRIWaveforms.
+lisatools = ["lisaanalysistools", "fastemriwaveforms"]
+# StableEMRIFisher for Fisher-matrix prior boxes / proposal covariances.
+fisher = ["stableemrifisher"]
+# GMM mode-jump proposal (impulse backend).
+gmm = ["scikit-learn"]
+# Chain diagnostics / P-P plots.
+diagnostics = ["arviz", "emcee", "matplotlib", "pandas"]
+# Common HDF5 results format (emridispatch-postprocess).
+results = ["h5py"]
+# Corner / 1D posterior plots from results files (emridispatch-plot).
+viz = ["h5py", "corner", "matplotlib"]
+dev = ["pytest"]
+all = ["emridispatch[impulse,eryn,lisatools,fisher,gmm,diagnostics,results,viz]"]
+
+[project.scripts]
+emridisp = "emridispatch.cli:main"
+emridisp-multichain = "emridispatch.multichain:main"
+emridisp-pp = "emridispatch.pp:main"
+emridisp-diagnostics = "emridispatch.diagnostics:main"
+emridisp-postprocess = "emridispatch.results:main"
+emridisp-plot = "emridispatch.viz:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/emridispatch"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
