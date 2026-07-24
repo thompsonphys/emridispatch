@@ -1,6 +1,6 @@
 # Annotated reference configuration for emridispatch.
 # Loaded by emridispatch.config.load_config(). Everything is set here. Run with:
-#     emridispatch emri_config.yaml
+#     emridisp emri_config.yaml
 #
 # Only injection/data/reparam/run are required sections; every other key has a
 # default (shown here) merged in at load time.

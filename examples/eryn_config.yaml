@@ -2,7 +2,7 @@
 # The eryn knobs live in the sampler.eryn subsection (the impulse subsection is
 # simply omitted). Raw output is <outdir>/eryn_chain.h5 (resume appends);
 # postprocess with `emridispatch-postprocess <outdir>`.
-#     emridispatch eryn_config.yaml
+#     emridisp eryn_config.yaml
 
 injection:
   mass_1: 1.0e+6   # note the +: YAML needs a signed exponent to parse as float

@@ -4,7 +4,7 @@
 # documents every optional block and knob (sampler backends, fisher provider,
 # per-parameter priors, pp, noise, ladder adaptation, start dispersion,
 # logging); omit what you don't use.
-#     emridispatch my_config.yaml
+#     emridisp my_config.yaml
 
 injection:
   mass_1: 1.0e+6   # note the +: YAML needs a signed exponent to parse as float
