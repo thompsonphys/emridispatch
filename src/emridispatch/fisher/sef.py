@@ -32,14 +32,18 @@ def _gpu_available():
 class SEFFisherProvider:
     name = "sef"
 
+    def __init__(self, tdi="2nd generation"):
+        self.tdi = tdi
+
     def compute(self, injection_parameters, *, duration, delta_t, use_gpu=None):
         sigmas, cov, order = get_parameter_precision(
             injection_parameters, duration=duration, delta_t=delta_t,
-            use_gpu=use_gpu)
+            use_gpu=use_gpu, tdi=self.tdi)
         return FisherResult(sigmas=sigmas, cov=cov, order=order)
 
 
-def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0, use_gpu=None):
+def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
+                            use_gpu=None, tdi="2nd generation"):
     # use_gpu=None -> auto-detect a usable CUDA device; True/False forces it.
     # This is the single switch: it drives StableEMRIFisher's own array backend
     # AND force_backend on the waveform (FastKerr), response (ResponseWrapper) and
@@ -76,17 +80,6 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0, use_gp
             "own sigmas/covariance."
         ) from err
 
-    # ResponseWrapper's home depends on the lisatools version: newer trees expose
-    # it as lisatools.response, older/installed ones still re-export the upstream
-    # fastlisaresponse.ResponseWrapper (which is also what lisatools' own EMRI
-    # source imports). Try the new path, fall back to the upstream package so this
-    # works across both layouts.
-    try:
-        from lisatools.response import ResponseWrapper
-    except ModuleNotFoundError:
-        from fastlisaresponse import ResponseWrapper
-    from lisatools.detector import EqualArmlengthOrbits
-
     # Waveform params -- match the injection's observation (duration/cadence) so
     # the Fisher-derived widths correspond to the SAME data the sampler analyses.
     dt = delta_t
@@ -119,12 +112,6 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0, use_gp
     }
     waveform_generator = GenerateEMRIWaveform
     waveform_generator_kwargs = {"return_list": False, "frame": "detector"}
-    tdi_kwargs = dict(
-        orbits=EqualArmlengthOrbits(force_backend=force_backend),
-        order=25,
-        tdi="2nd generation",
-        tdi_chan="AE",
-    )
 
     INDEX_LAMBDA = 8
     INDEX_BETA = 7
@@ -132,21 +119,51 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0, use_gp
     # with longer signals we care less about this
     t0 = 20000.0  # throw away on both ends when our orbital information is weird
 
-    ResponseWrapper_kwargs = dict(
-        Tobs=T,
-        dt=dt,
-        index_lambda=INDEX_LAMBDA,
-        index_beta=INDEX_BETA,
-        t0=t0,
-        flip_hx=True,
-        force_backend=force_backend,  # "cpu" or None (GPU auto)
-        # NB: no use_gpu here -- lisatools.response.ResponseWrapper forwards
-        # unknown kwargs to pyResponseTDI, which rejects use_gpu. Backend is
-        # selected via force_backend + the orbits/waveform backends above.
-        is_ecliptic_latitude=False,
-        remove_garbage="zero",
-        **tdi_kwargs,
-    )
+    if tdi == "off":
+        from lisatools.sensitivity import LISASens
+
+        ResponseWrapper = None
+        ResponseWrapper_kwargs = None
+        extra_sef_kwargs = dict(
+            noise_model=LISASens.get_Sn,
+            noise_kwargs={},
+            channels=["I", "II"],
+        )
+        logger.info("fisher: tdi off (no ResponseWrapper, sky-averaged PSD)")
+    else:
+        # ResponseWrapper's home depends on the lisatools version: newer trees
+        # expose it as lisatools.response, older/installed ones still re-export
+        # the upstream fastlisaresponse.ResponseWrapper (which is also what
+        # lisatools' own EMRI source imports). Try the new path, fall back to the
+        # upstream package so this works across both layouts.
+        try:
+            from lisatools.response import ResponseWrapper
+        except ModuleNotFoundError:
+            from fastlisaresponse import ResponseWrapper
+        from lisatools.detector import EqualArmlengthOrbits
+
+        tdi_kwargs = dict(
+            orbits=EqualArmlengthOrbits(force_backend=force_backend),
+            order=25,
+            tdi=tdi,
+            tdi_chan="AE",
+        )
+        ResponseWrapper_kwargs = dict(
+            Tobs=T,
+            dt=dt,
+            index_lambda=INDEX_LAMBDA,
+            index_beta=INDEX_BETA,
+            t0=t0,
+            flip_hx=True,
+            force_backend=force_backend,  # "cpu" or None (GPU auto)
+            # NB: no use_gpu here -- lisatools.response.ResponseWrapper forwards
+            # unknown kwargs to pyResponseTDI, which rejects use_gpu. Backend is
+            # selected via force_backend + the orbits/waveform backends above.
+            is_ecliptic_latitude=False,
+            remove_garbage="zero",
+            **tdi_kwargs,
+        )
+        extra_sef_kwargs = {}
 
     der_order = 4
     Ndelta = 8
@@ -166,6 +183,7 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0, use_gp
         stability_plot=False,
         return_derivatives=False,
         deriv_type="stable",
+        **extra_sef_kwargs,
     )
 
     # FastKerrEccentricEquatorialFlux is equatorial (xI0 fixed at 1), so xI0 is
@@ -194,6 +212,8 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0, use_gp
     )
 
     param_cov = np.linalg.inv(fisher_matrix)
+    if tdi == "off":
+        param_cov = param_cov * 2.0
     key_map = {
         "m1": "mass_1",
         "m2": "mass_2",

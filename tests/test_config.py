@@ -99,3 +99,23 @@ def test_partial_subsection_merges_defaults(tmp_path):
     assert cfg.sampler.eryn.ntemps == 1
     # Sibling subsection untouched.
     assert cfg.sampler.impulse.cov_update == 50
+
+
+def test_tdi_default(tmp_path):
+    cfg = load_config(write_cfg(tmp_path))
+    assert cfg.data.tdi == "2nd generation"
+
+
+def test_tdi_coercions(tmp_path):
+    cases = [("off", "off"), (False, "off"),
+             ("1st", "1st generation"), ("1st generation", "1st generation"),
+             ("2nd", "2nd generation"), ("2nd generation", "2nd generation"),
+             (True, "2nd generation")]
+    for raw, want in cases:
+        cfg = load_config(write_cfg(tmp_path, data={"tdi": raw}))
+        assert cfg.data.tdi == want, raw
+
+
+def test_tdi_invalid(tmp_path):
+    with pytest.raises(ValueError, match="data.tdi"):
+        load_config(write_cfg(tmp_path, data={"tdi": "3rd"}))

@@ -24,6 +24,7 @@ Config (`prior:` section):
 """
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Protocol
 
 import numpy as np
@@ -86,7 +87,9 @@ def get_fisher_provider(cfg):
     if kind == "sef":
         from emridispatch.fisher.sef import SEFFisherProvider
 
-        return SEFFisherProvider()
+        tdi = str(getattr(getattr(cfg, "data", SimpleNamespace()),
+                          "tdi", "2nd generation"))
+        return SEFFisherProvider(tdi=tdi)
     if kind == "manual":
         return _manual.ManualFisherProvider.from_config(cfg)
     if kind in ("none", "heuristic"):

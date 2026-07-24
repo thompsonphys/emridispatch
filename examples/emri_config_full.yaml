@@ -38,7 +38,12 @@ data:
   duration: 0.3     # years
   delta_t: 10.0     # seconds
   inj_snr: 30.0     # null -> skip SNR calibration (distance stays as injected)
-  channels: [A, E]
+  channels: [A, E]  # TDI channels (ignored when tdi: off)
+  tdi: 2nd          # off | 1st | 2nd -- off = no LISA response (direct h+
+                    # channel vs sky-averaged sensitivity); 1st/2nd pick the
+                    # TDI generation for response AND sensitivity (default 2nd)
+                    # NB: the likelihood previously hardcoded 1st generation, so
+                    # omitting this key now gives 2nd, not 1st
   add_noise: false  # add a Gaussian noise realization drawn from the PSD
   noise_seed: 0     # dedicated noise seed -- independent of run.seed
 

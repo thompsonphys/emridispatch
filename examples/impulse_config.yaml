@@ -27,7 +27,10 @@ data:
   duration: 0.1    # years
   delta_t: 10.0    # seconds
   inj_snr: 30.0    # rescales distance to this SNR (null: use distance verbatim)
-  channels: [A, E]
+  channels: [A, E]  # TDI channels (ignored when tdi: off)
+  tdi: 2nd          # off | 1st | 2nd -- off = no LISA response (direct h+
+                    # channel vs sky-averaged sensitivity); 1st/2nd pick the
+                    # TDI generation for response AND sensitivity (default 2nd)
 
 sampler:
   backend: impulse

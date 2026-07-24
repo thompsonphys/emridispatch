@@ -19,6 +19,24 @@ def _as_mode(v):
     return str(v)
 
 
+_TDI_ALIASES = {
+    "off": "off",
+    "1st": "1st generation", "1st generation": "1st generation",
+    "2nd": "2nd generation", "2nd generation": "2nd generation",
+}
+
+
+def _as_tdi(v):
+    if isinstance(v, bool):
+        return "2nd generation" if v else "off"
+    s = str(v).strip().lower()
+    if s not in _TDI_ALIASES:
+        raise ValueError(
+            f"data.tdi must be one of off | 1st | 2nd "
+            f"(or '1st generation' / '2nd generation') (got {v!r})")
+    return _TDI_ALIASES[s]
+
+
 def _as_float(v):
     """Coerce injection scalars to float (YAML may leave `1.0e6` a string)."""
     return float(v)
@@ -43,6 +61,9 @@ def load_config(path):
     # float injection scalars so a config typo can't reach the sampler.
     raw["reparam"]["mode"] = _as_mode(raw["reparam"]["mode"])
     raw["injection"] = {k: _as_float(v) for k, v in raw["injection"].items()}
+
+    raw_data = dict(raw["data"])
+    raw_data["tdi"] = _as_tdi(raw_data.get("tdi", "2nd generation"))
 
     raw_sampler = dict(raw.get("sampler") or {})
     raw_impulse = dict(raw_sampler.pop("impulse", None) or {})
@@ -73,7 +94,7 @@ def load_config(path):
 
     return SimpleNamespace(
         injection=raw["injection"],                     # kept a dict for the generator
-        data=SimpleNamespace(**raw["data"]),
+        data=SimpleNamespace(**raw_data),
         sampler=sampler,
         prior=_merge_ns(
             {"box_scale": 3.0, "fisher": "auto", "angle_sigma": 0.05,
