@@ -48,4 +48,4 @@ htmlcov/
 tdi*_wo_background.npy
 
 # chain output
-*_chains/
+*chains*/
