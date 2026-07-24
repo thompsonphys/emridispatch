@@ -101,6 +101,13 @@ class EMRIInjectionGenerator:
             T=self.duration,
             dt=self.delta_t,
         )
+        _response = self.waveform_generator.response
+        logger.info(
+            "backends: response=%s tdi=%s few=%s",
+            _response.backend.name,
+            _response.response_model.backend.name,
+            _response.waveform_gen.waveform_generator.backend.name,
+        )
 
         # Build the injection and calibrate the distance to hit injection_snr.
         self.emri_injection_generator()
