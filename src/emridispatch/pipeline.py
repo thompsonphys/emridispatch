@@ -48,7 +48,6 @@ _FISHER_DISTS = {
     "sef": ["stableemrifisher"],
     "auto": ["stableemrifisher"],   # auto uses SEF when importable
     "manual": [],
-    "deltas": [],
     "none": [],
 }
 

@@ -111,9 +111,8 @@ sampler:
 #   auto   - manual if sigmas/covariance_file given, else StableEMRIFisher if
 #            installed (`pip install emridispatch[fisher]`), else a loud heuristic
 #   sef    - StableEMRIFisher, error if missing
-#   manual - use prior.sigmas and/or prior.covariance_file below
-#   deltas - rectangular box from prior.deltas half-widths: bounds =
-#            truth +/- box_scale*delta
+#   manual - use prior.sigmas and/or prior.covariance_file below; the box is
+#            truth +/- box_scale*sigma
 #   none   - heuristic placeholder widths
 # angle_sigma: start scale (rad) for the 6 angle/phase proposals.
 # fisher_use_gpu: run the one-off Fisher on GPU (SEF needs ~10.6 GB) or CPU
@@ -137,13 +136,6 @@ prior:
   #   e: 1.0e-5
   #   luminosity_distance: 0.05
   # covariance_file: fisher_cov.npz   # npz with keys: cov (6x6) [, order]
-  # deltas:                      # fisher: deltas half-widths (linear coords);
-  #   mass_1: 1.0                # box = truth +/- box_scale*delta, angles keep
-  #   mass_2: 1.0e-4             # their full physical ranges
-  #   a: 1.0e-5
-  #   p: 1.0e-6
-  #   e: 1.0e-6
-  #   luminosity_distance: 0.05
 
 # --------------------------------------------------------------------------
 # Per-parameter prior overrides (optional). By default every parameter is

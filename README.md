@@ -1,12 +1,12 @@
 # emridispatch
 
 Feel like running parameter estimation on extreme mass-ratio inspiral (EMRI)
-gravitational-wave signals? This could provides an easy-to-use YAML-based interface
+gravitational-wave signals? This code provides an easy-to-use YAML-based interface
 to inject and recover EMRI signals using (eventually) a broad range of Bayesian
-samplers. There is also flexibility to use a variety of TDI/response
+samplers. It also includes flexibility to use a variety of TDI/response
 implementations, Fisher matrix providers, and flexible per-parameter priors.
 
-By default the code samples the 12-D EMRI vector (currently equatorial-orbit support)
+By default the code samples the 12-D (equatorial) EMRI parameter vector 
 `[ln m1, ln m2, a, p, e, dist, q_s, phi_s, q_k, phi_k, phi_phi, phi_r]`
 against a matched-filter likelihood built from one injection, with
 Fisher-sized intrinsic prior boxes, an optional whitening reparametrization of
@@ -61,7 +61,7 @@ emridisp-plot my_outdir --temps 0 3 5 --burn 500
 ```
 
 `emridisp-postprocess` converts a run's backend-specific raw output (impulse
-`chain_N.txt` files or eryn's `eryn_chain.h5`, walkers flattened per rung) into a
+`chain_N.txt` files or Eryn's `eryn_chain.h5`, walkers flattened per rung) into a
 self-contained `results.h5`. This file contains chains 
 for every temperature rung in both sampling
 and physical coordinates, the injection truth, prior spec + bounds, the run config,
@@ -81,26 +81,24 @@ config.yaml -> build_problem(cfg) -> SamplingProblem -> backend.run(problem, cfg
 - **`emridispatch.pipeline`** builds a sampler-agnostic `SamplingProblem`: the raw
   physical-space likelihood, a structured `JointPrior`, the reparam transform,
   start point, and proposal covariance. No sampler is imported.
-- **`emridispatch.backends`** — sampler registry. Built in: `impulse` (PT-MCMC,
+- **`emridispatch.backends`** is a sampler registry. Built in: `impulse` (PT-MCMC,
   temperature ladder, cross-chain mode jumps; `chain_N.txt` output) and `eryn`
   (parallel-tempered ensemble sampler, stretch move, `eryn_chain.h5` output).
   Shared sampler knobs live at the top of the config `sampler:` section;
   backend-specific ones in its `impulse:`/`eryn:` subsections. Other sampler backends
-  plug in via `register_backend()` consuming the same `SamplingProblem` —
-  likelihood, TDI response, prior, and reparametrization are shared, never
-  re-implemented per sampler. MCMC backends opt into the whitened coordinates
+  plug in via `register_backend()` consuming the same `SamplingProblem`, where
+  likelihood, TDI response, prior, and reparametrization are shared. MCMC backends opt into the whitened coordinates
   via `problem.wrapped()`; nested-sampler backends can use the structured
   prior + physical likelihood directly.
-- **`emridispatch.response`** — injection/likelihood registry (`data.response`).
+- **`emridispatch.response`** is the injection/likelihood registry (`data.response`).
   `lisatools` is the production TDI implementation; `toy` is a dependency-free
   Gaussian for structure testing. Other TDI codes register via
   `register_model()`.
 - **`emridispatch.fisher`** — Fisher providers (`prior.fisher`):
-  `sef` (StableEMRIFisher), `manual` (config sigmas / covariance npz),
-  `deltas` (rectangular box prior `truth ± box_scale·delta` from configured
-  half-widths), or a loud heuristic fallback so the pipeline runs 
-  end-to-end with nothing installed.
-- **`emridispatch.priors`** — per-parameter distributions (uniform, log-uniform,
+  `sef` (StableEMRIFisher), `manual` (config sigmas / covariance npz, giving a
+  rectangular box prior `truth ± box_scale·sigma`), or a loud heuristic
+  fallback so the pipeline runs end-to-end with nothing installed.
+- **`emridispatch.priors`** allows per-parameter distributions (uniform, log-uniform,
   Gaussian, sine/cosine, periodic, user callables) composed into a
   `JointPrior`; override any parameter from the config `priors:` section.
 

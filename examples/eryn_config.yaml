@@ -41,12 +41,12 @@ sampler:
     progress: false
     start_spread: 1.0   # walker scatter around the start, in proposal sigmas
 
-# rectangular box prior: bounds = truth +/- box_scale*delta
+# rectangular box prior: bounds = truth +/- box_scale*sigma
 # (works with any backend; swap for fisher: auto to size the box from a Fisher).
 prior:
-  fisher: deltas
+  fisher: manual
   box_scale: 25.0
-  deltas:
+  sigmas:
     mass_1: 1.0
     mass_2: 1.0e-4
     a: 1.0e-5
