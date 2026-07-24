@@ -7,7 +7,9 @@ samplers. It also includes flexibility to use a variety of TDI/response
 implementations, Fisher matrix providers, and flexible per-parameter priors.
 
 By default the code samples the 12-D (equatorial) EMRI parameter vector 
-`[ln m1, ln m2, a, p, e, dist, q_s, phi_s, q_k, phi_k, phi_phi, phi_r]`
+
+`[ln mass_1, ln mass_2, a, p, e, distance, q_s, phi_s, q_k, phi_k, phi_phi, phi_r]`
+
 against a matched-filter likelihood built from one injection, with
 Fisher-sized intrinsic prior boxes, an optional whitening reparametrization of
 the intrinsic block, PT-MCMC with adaptive mode-jump proposals, multi-chain
@@ -41,6 +43,8 @@ not on PyPI in your environment, install them from their git sources first.
 
 ## Run
 
+### Using the CLI
+
 ```bash
 emridisp examples/my_config.yaml                   # single PE run
 emridisp-multichain my_config.yaml --nchains 4     # independent chains -> R-hat
@@ -50,6 +54,23 @@ emridisp-pp my_config.yaml --nruns 20              # P-P calibration test
 
 Everything is configured through the YAML file (see `examples/emri_config_full.yaml`
 for the annotated reference). Logs go to the console and `<outdir>/run.log` by default.
+
+### Example script usage
+
+If you prefer plain Python over the CLI hooks, then load the config, 
+override any desired run parameters, and run:
+
+```python
+from emridispatch.config import load_config
+from emridispatch.pipeline import run_from_config
+
+cfg = load_config("examples/impulse_config.yaml")
+cfg.sampler.nsamples = 500          # override anything from the YAML
+run_from_config(cfg, resume=True)
+```
+
+See `examples/run_impulse.py` and `examples/run_impulse.ipynb` for complete
+templates (with weird env guards, run-dir setup, logging).
 
 ## Postprocess & visualize
 
