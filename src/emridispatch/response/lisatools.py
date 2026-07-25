@@ -267,7 +267,9 @@ class EMRIInjectionGenerator:
         """
         fd = self.data_residual_array.data_res_arr  # FDSignal
         xp = fd.xp
-        S = np.asarray(self.sensetivity_matrix.sens_mat)   # (nchan, nf), host
+        _sens_mat = self.sensetivity_matrix.sens_mat
+        S = (_sens_mat.get() if hasattr(_sens_mat, "get")
+             else np.asarray(_sens_mat))                   # (nchan, nf), host
         nchan, nf = S.shape
         # Observation time from the actual frequency resolution (the generated
         # array's length can differ slightly from duration*YRSID_SI/delta_t).
