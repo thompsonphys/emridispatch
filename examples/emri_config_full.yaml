@@ -49,6 +49,12 @@ data:
                     # Fisher, for every tdi setting.
   add_noise: false  # add a Gaussian noise realization drawn from the PSD
   noise_seed: 0     # dedicated noise seed -- independent of run.seed
+  pad_fft: true     # zero-pad to a 5-smooth FFT length (fixed for the run)
+  psd_notch: 1.0e-5       # half-width (Hz) masked around each sensitivity null;
+                          # 0 disables. Nulls are located from the PSD itself.
+  psd_notch_depth: 2.0    # decades below the local baseline that flags a null
+  psd_notch_strict: true  # raise PSDNullError when the injection radiates at a
+                          # null (SNR there is not trustworthy); false = warn
 
 # --------------------------------------------------------------------------
 # Sampler: shared knobs at the top level, backend-specific knobs in the

@@ -2,15 +2,13 @@
 
 Optional dependency: `pip install emridispatch[lisatools]`. All lisatools imports
 happen at construction time, so this module imports clean without it.
-
-Ported from gwsampling's emri/injection_generator.py + emri/likelihood.py, with
-the Fisher computation excised (see emridispatch.fisher for providers).
 """
 
 import logging
 from types import SimpleNamespace
 
 import numpy as np
+from scipy.fft import next_fast_len
 
 from emridispatch.noise import (
     load_sensitivity_table, noise_sens_kwargs, sensitivity_spec)
@@ -20,10 +18,15 @@ from emridispatch.response import InjectionModel
 logger = logging.getLogger(__name__)
 
 
+class PSDNullError(RuntimeError):
+    """Injection radiates at a TDI transfer-function null, where the analytic
+    sensitivity is not trustworthy and no notch width recovers the true SNR."""
+
+
 def _import_lisatools():
     try:
         from lisatools.datacontainer import DataResidualArray
-        from lisatools.domains import TDSettings
+        from lisatools.domains import FDSettings, TDSettings
         from lisatools.sensitivity import SensitivityMatrix
         from lisatools.analysiscontainer import AnalysisContainer
         from lisatools.diagnostic import inner_product, noise_likelihood_term
@@ -40,6 +43,7 @@ def _import_lisatools():
     return SimpleNamespace(
         DataResidualArray=DataResidualArray,
         TDSettings=TDSettings,
+        FDSettings=FDSettings,
         SensitivityMatrix=SensitivityMatrix,
         GenerateEMRIWaveform=GenerateEMRIWaveform,
         AnalysisContainer=AnalysisContainer,
@@ -93,6 +97,10 @@ class EMRIInjectionGenerator:
         full_likelihood=False,
         add_noise=False,
         noise_seed=0,
+        pad_fft=True,
+        psd_notch=1e-5,
+        psd_notch_depth=2.0,
+        psd_notch_strict=True,
     ):
         self._lt = _import_lisatools()
 
@@ -100,21 +108,17 @@ class EMRIInjectionGenerator:
         self.injection_snr = injection_snr
         self.delta_t = delta_t
         self.duration = duration
-        # Optional Gaussian noise realization added to the data (drawn from the
-        # sensitivity PSD). noise_seed is a DEDICATED seed -- independent of the
-        # sampler's run.seed, so noise draws and chain randomness decouple.
         self.add_noise = add_noise
         self.noise_seed = noise_seed
-        # When False (default), evaluate_likelihood returns only the
-        # template-VARYING part of ln L (drops the constant noise + <d|d> terms).
-        # Those constants (~1e8) swamp the ~1e2 signal contrast in floating point,
-        # so dropping them recovers precision -- and a constant offset cancels in
-        # the MCMC acceptance ratio and PT swaps, so the posterior is unchanged.
-        # Set True only when the absolute, correctly-normalised ln L is needed
-        # (e.g. evidence / thermodynamic integration).
         self.full_likelihood = full_likelihood
         self.tdi = tdi
         self.foreground = foreground
+        self.pad_fft = pad_fft
+        self._fft_length = None
+        self.psd_notch = float(psd_notch)
+        self.psd_notch_depth = float(psd_notch_depth)
+        self.psd_notch_strict = bool(psd_notch_strict)
+        self._psd_notch_mask = None
 
         self.waveform_generator, self.channel_list, self.sensetivity_list = (
             _build_waveform_and_sens(
@@ -137,12 +141,6 @@ class EMRIInjectionGenerator:
         # Build the injection and calibrate the distance to hit injection_snr.
         self.emri_injection_generator()
 
-        # Two pieces of the likelihood are CONSTANT for the whole run (they depend
-        # only on the fixed data + sensitivity matrix, not the template), so compute
-        # them once here instead of on every likelihood call:
-        #   * the noise term          -sum log|detC|
-        #   * the data auto-inner-product  <d|d>
-        # Only <d|h> and <h|h> vary per template (see evaluate_likelihood).
         self._noise_term = self._lt.noise_likelihood_term(self.sensetivity_matrix)
         self._d_d = self._lt.inner_product(
             self.data_residual_array,
@@ -150,8 +148,6 @@ class EMRIInjectionGenerator:
             psd=self.sensetivity_matrix,
             normalize=False,
         )
-        # Constant part of ln L = noise term + (-1/2 <d|d>). Added back only when
-        # full_likelihood is requested; otherwise it is dropped for precision.
         self._lnlike_const = self._noise_term - 0.5 * self._d_d
 
     @staticmethod
@@ -188,15 +184,131 @@ class EMRIInjectionGenerator:
             float(Phi_r0),
         ]
 
+    def _pad_to_fft_length(self, channel_strain, xp):
+        n = channel_strain.shape[-1]
+        if self._fft_length is None:
+            self._fft_length = next_fast_len(n, True) if self.pad_fft else n
+            logger.info("fft length: %d -> %d samples (+%.2f%%)", n,
+                        self._fft_length, 100.0 * (self._fft_length - n) / n)
+        n_pad = self._fft_length
+        if n == n_pad:
+            return channel_strain
+        if n > n_pad:
+            logger.error("template length %d exceeds the fixed FFT length %d",
+                         n, n_pad)
+            raise ValueError(
+                f"template length {n} exceeds the fixed FFT length {n_pad}")
+        padded = xp.zeros(channel_strain.shape[:-1] + (n_pad,),
+                          dtype=channel_strain.dtype)
+        padded[..., :n] = channel_strain
+        return padded
+
+    def _psd_null_mask(self, f_arr, sens_mat, block=4096, _width=None):
+        width = self.psd_notch if _width is None else _width
+        if width <= 0.0:
+            return None
+        f = np.asarray(f_arr.get() if hasattr(f_arr, "get") else f_arr)
+        S = np.asarray(sens_mat.get() if hasattr(sens_mat, "get") else sens_mat)
+        S = S.reshape(-1, S.shape[-1])
+        nf = S.shape[-1]
+        nblk = int(np.ceil(nf / block))
+        pad = nblk * block - nf
+        bad = np.zeros(nf, dtype=bool)
+        with np.errstate(all="ignore"):
+            for row in S:
+                v = np.log10(np.where(np.isfinite(row) & (row > 0), row, np.nan))
+                vp = np.concatenate([v, np.full(pad, np.nan)]).reshape(nblk, block)
+                med = np.nanmedian(vp, axis=1)[:, None]
+                bad |= (vp < med - self.psd_notch_depth).reshape(-1)[:nf]
+        if not bad.any():
+            return None
+        centres = f[bad]
+        lo = np.searchsorted(f, centres - width, side="left")
+        hi = np.searchsorted(f, centres + width, side="right")
+        mask = np.zeros(nf, dtype=bool)
+        for a, b in zip(lo, hi):
+            mask[a:b] = True
+        logger.info(
+            "psd notch: %d null bin(s) at %s Hz -> masking %d/%d bins "
+            "(half-width %g Hz, depth %g decades)",
+            int(bad.sum()),
+            np.array2string(np.unique(centres.round(9)), precision=7,
+                            max_line_width=120),
+            int(mask.sum()), nf, width, self.psd_notch_depth)
+        return mask
+
+    def _apply_psd_notch(self):
+        sens = self.sensetivity_matrix
+        mask = self._psd_null_mask(
+            self._data_residual_array.settings.f_arr, sens.sens_mat)
+        if mask is None:
+            return
+        invC = sens.invC
+        try:
+            import cupy as _cp
+
+            xp = _cp.get_array_module(invC)
+        except ImportError:
+            xp = np
+        invC[..., xp.asarray(mask)] = 0.0
+        sens.invC = invC
+        self._psd_notch_mask = mask
+        self._check_notch_stability(mask)
+
+    def _check_notch_stability(self, mask, factor=10.0, tol=0.01):
+        wide = self._psd_null_mask(
+            self._data_residual_array.settings.f_arr,
+            self.sensetivity_matrix.sens_mat,
+            _width=self.psd_notch * factor)
+        if wide is None:
+            return
+        d = self._data_residual_array.data_res_arr.arr
+        try:
+            import cupy as _cp
+
+            xp = _cp.get_array_module(d)
+        except ImportError:
+            xp = np
+        S = self.sensetivity_matrix.sens_mat
+        good = xp.isfinite(S) & (S > 0)
+        power = xp.where(good, xp.abs(d) ** 2 / xp.where(good, S, 1.0), 0.0)
+        keep_n = ~xp.asarray(mask)
+        keep_w = ~xp.asarray(wide)
+        s_n = float(xp.sum(power * keep_n))
+        s_w = float(xp.sum(power * keep_w))
+        if not np.isfinite(s_n) or s_n <= 0.0:
+            self._notch_drift = float("nan")
+            logger.warning(
+                "psd notch check skipped: injection has no SNR outside the "
+                "notched bands (<d|d> = %r). The notch stability of this "
+                "injection is unverified.", s_n)
+            return
+        drift = abs(s_w / s_n - 1.0)
+        self._notch_drift = drift
+        if drift <= tol:
+            logger.info("psd notch stable: %gx widening shifts SNR^2 by %.3f%%",
+                        factor, 100.0 * drift)
+            return
+        msg = (
+            f"injection radiates at the {self.tdi} TDI nulls: {factor:g}x notch "
+            f"widening shifts SNR^2 by {100.0 * drift:.1f}% (tol "
+            f"{100.0 * tol:.1f}%). Try `data.tdi: 1st`, or `data.tdi: off`; "
+            f"`data.psd_notch_strict: false` proceeds regardless.")
+        if self.psd_notch_strict:
+            raise PSDNullError(msg)
+        logger.warning("psd notch UNSTABLE (psd_notch_strict=false): %s", msg)
+
+    def _fd_settings(self, td_settings):
+        return self._lt.FDSettings(
+            td_settings.N // 2 + 1, 1.0 / (td_settings.N * td_settings.dt),
+            force_backend=td_settings.force_backend)
+
     def _produce_data_residual_array(self, params=None):
         if params is None:
             params = self.injection_parameters
 
         _channel_strain = self.waveform_generator(*self._get_params(params))
-        # Keep the TDI channels on whatever device the waveform generator used
-        # (GPU/cupy when available) so the whole data path -- stacking, FFT and
-        # inner products -- stays on the GPU. Only fall back to host/numpy when
-        # cupy is not installed (e.g. a CPU-only machine).
+
         try:
             import cupy as _cp
 
@@ -204,9 +316,11 @@ class EMRIInjectionGenerator:
         except ImportError:
             xp = np
         channel_strain = xp.asarray([xp.asarray(AET) for AET in _channel_strain])
+        channel_strain = self._pad_to_fft_length(channel_strain, xp)
         td_settings = self._lt.TDSettings(channel_strain.shape[-1], self.delta_t)
         return self._lt.DataResidualArray(
-            channel_strain, input_signal_domain=td_settings)
+            channel_strain, input_signal_domain=td_settings,
+            signal_domain=self._fd_settings(td_settings))
 
     def emri_injection_generator(self):
         self._data_residual_array = self._produce_data_residual_array()
@@ -215,6 +329,7 @@ class EMRIInjectionGenerator:
             self.sensetivity_list,
             **noise_sens_kwargs(self.duration, self.foreground),
         )
+        self._apply_psd_notch()
         self._analysis_container = self._lt.AnalysisContainer(
             self._data_residual_array,
             self.sensetivity_matrix,
@@ -244,15 +359,8 @@ class EMRIInjectionGenerator:
             self.data_residual_array = self._data_residual_array
             self.analysis_container = self._analysis_container
 
-        # Optimal (signal-only) SNR of the injection, recorded BEFORE any noise is
-        # added: with noise in the data, analysis_container.snr() = sqrt(<d|d>)
-        # includes the noise power and is no longer the injected signal SNR.
         self.optimal_snr = float(np.real(self.analysis_container.snr()))
 
-        # Noise LAST: SNR calibration above must run against the clean signal
-        # (its snr() assertion would fail on noisy data). The <d|d> / noise-term
-        # constants are computed in __init__ AFTER this returns, so they pick up
-        # the noisy data automatically.
         if self.add_noise:
             self._add_noise_realization()
 
@@ -271,8 +379,6 @@ class EMRIInjectionGenerator:
         S = (_sens_mat.get() if hasattr(_sens_mat, "get")
              else np.asarray(_sens_mat))                   # (nchan, nf), host
         nchan, nf = S.shape
-        # Observation time from the actual frequency resolution (the generated
-        # array's length can differ slightly from duration*YRSID_SI/delta_t).
         T = 1.0 / float(fd.df)
         good = np.isfinite(S).all(axis=0) & (S > 0).all(axis=0)
 
@@ -285,6 +391,7 @@ class EMRIInjectionGenerator:
         )
 
         fd.arr[:] = fd.arr + xp.asarray(noise)
+
         # Rebuild the container so anything derived from the data sees the noise.
         self.analysis_container = self._lt.AnalysisContainer(
             self.data_residual_array,
@@ -301,10 +408,8 @@ class EMRIInjectionGenerator:
         """Log-likelihood for a template.
 
         By default (full=None -> self.full_likelihood, i.e. False) returns only the
-        template-VARYING part <d|h> - 1/2<h|h>, dropping the constant noise and
-        <d|d> terms. Those constants are ~1e8 while the signal contrast is ~1e2, so
-        keeping them costs floating-point precision; dropping a constant offset does
-        not change the MCMC posterior (it cancels in acceptance ratios / PT swaps).
+        template-varying part <d|h> - 1/2<h|h>, dropping the constant noise and
+        <d|d> terms. 
         Pass full=True (or construct with full_likelihood=True) to get the absolute,
         correctly-normalised ln L = noise + (-1/2)(<d|d> + <h|h> - 2<d|h>).
         """
@@ -318,9 +423,6 @@ class EMRIInjectionGenerator:
         else:
             raise TypeError("please input a dict of parameters or a DataResidualArray")
 
-        # Only <d|h> and <h|h> depend on the template; <d|d> and the noise term are
-        # cached constants. The varying part is <d|h> - 1/2<h|h> (this is what the
-        # sampler needs, at full precision).
         d_h = self._lt.inner_product(
             self.data_residual_array, sig_dat_array,
             psd=self.sensetivity_matrix, normalize=False,
@@ -337,9 +439,6 @@ class EMRIInjectionGenerator:
         return varying_term
 
 
-# Gaussian matched-filter likelihood <d|h> - 1/2<h|h> (constants dropped).
-# Data is the injected signal, optionally plus a PSD noise realization
-# (add_noise/noise_seed kwargs, handled by EMRIInjectionGenerator).
 class LisatoolsEMRILikelihood(EMRIInjectionGenerator, InjectionModel):
     def __init__(self, injection_parameters, vectorized=False, **kwargs):
         super().__init__(injection_parameters, **kwargs)
@@ -373,6 +472,10 @@ class LisatoolsEMRILikelihood(EMRIInjectionGenerator, InjectionModel):
             foreground=bool(getattr(cfg.data, "foreground", True)),
             add_noise=bool(getattr(cfg.data, "add_noise", False)),
             noise_seed=int(getattr(cfg.data, "noise_seed", 0)),
+            pad_fft=bool(getattr(cfg.data, "pad_fft", True)),
+            psd_notch=float(getattr(cfg.data, "psd_notch", 1e-5)),
+            psd_notch_depth=float(getattr(cfg.data, "psd_notch_depth", 2.0)),
+            psd_notch_strict=bool(getattr(cfg.data, "psd_notch_strict", True)),
         )
 
     def __call__(self, params):
@@ -384,11 +487,6 @@ class LisatoolsEMRILikelihood(EMRIInjectionGenerator, InjectionModel):
             semilatus_rectum = params[3]
             eccentricity = params[4]
             dist = params[5]
-            # Full-space angles/phases (equatorial Kerr): sky location (q_s, phi_s),
-            # spin orientation (q_k, phi_k) and the radial/azimuthal initial phases
-            # (phi_phi, phi_r). x (inclination) and phi_theta (polar phase) stay at
-            # their injected values -- the FastKerrEccentricEquatorial model is
-            # equatorial, so both are fixed, not sampled.
             q_s = params[6]
             phi_s = params[7]
             q_k = params[8]
@@ -412,19 +510,9 @@ class LisatoolsEMRILikelihood(EMRIInjectionGenerator, InjectionModel):
         template_params["phi_phi"] = phi_phi
         template_params["phi_r"] = phi_r
 
-        # evaluate_likelihood returns the log-likelihood ln L. By default it is the
-        # template-VARYING part only (<d|h> - 1/2<h|h>); the constant noise + <d|d>
-        # terms are dropped for floating-point precision and cancel in the sampler
-        # anyway (construct with full_likelihood=True for the absolute value).
-        # The sampler consumes exp(lnprior + lnlike/T), so return +ln L directly --
-        # do NOT take a second log or negate. (np.real: inner products can carry a
-        # tiny imaginary part.) Any waveform failure (e.g. a proposal in an invalid
-        # region of parameter space) => -inf so the sampler just rejects it.
         try:
             result = self.evaluate_likelihood(template_params)
-            # evaluate_likelihood runs on the GPU, so the returned scalar is a
-            # cupy 0-d array; pull the single value back to the host so the
-            # sampler (which expects numpy/python floats) can consume it.
+
             if hasattr(result, "get"):
                 result = result.get()
             result = np.real(result)
