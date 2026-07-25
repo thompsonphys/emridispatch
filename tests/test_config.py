@@ -119,3 +119,15 @@ def test_tdi_coercions(tmp_path):
 def test_tdi_invalid(tmp_path):
     with pytest.raises(ValueError, match="data.tdi"):
         load_config(write_cfg(tmp_path, data={"tdi": "3rd"}))
+
+
+def test_foreground_default(tmp_path):
+    cfg = load_config(write_cfg(tmp_path))
+    assert cfg.data.foreground is True
+
+
+def test_foreground_coercions(tmp_path):
+    cases = [(True, True), (False, False), ("", False), (1, True), (0, False)]
+    for raw, want in cases:
+        cfg = load_config(write_cfg(tmp_path, data={"foreground": raw}))
+        assert cfg.data.foreground is want, raw

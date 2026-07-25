@@ -64,6 +64,7 @@ def load_config(path):
 
     raw_data = dict(raw["data"])
     raw_data["tdi"] = _as_tdi(raw_data.get("tdi", "2nd generation"))
+    raw_data["foreground"] = bool(raw_data.get("foreground", True))
 
     raw_sampler = dict(raw.get("sampler") or {})
     raw_impulse = dict(raw_sampler.pop("impulse", None) or {})

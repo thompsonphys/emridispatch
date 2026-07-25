@@ -7,6 +7,12 @@ import pytest
 from emridispatch.config import load_config
 from emridispatch.parameters import NDIM, PARAM_NAMES
 
+STUB_TABLE = {
+    "off": {"I": "LISASens", "II": "LISASens"},
+    "1st generation": {"A": "A1", "E": "E1", "T": "T1"},
+    "2nd generation": {"A": "A2", "E": "E2", "T": "T2"},
+}
+
 MINIMAL_TOY_CONFIG = """
 injection:
   mass_1: 1.0e+6

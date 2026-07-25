@@ -10,6 +10,8 @@ import logging
 import numpy as np
 
 from emridispatch.fisher import FisherResult
+from emridispatch.noise import (
+    channel_noise_psd, per_channel_noise_kwargs, sensitivity_spec)
 
 logger = logging.getLogger(__name__)
 
@@ -32,18 +34,22 @@ def _gpu_available():
 class SEFFisherProvider:
     name = "sef"
 
-    def __init__(self, tdi="2nd generation"):
+    def __init__(self, tdi="2nd generation", foreground=True, channels=None):
         self.tdi = tdi
+        self.foreground = foreground
+        self.channels = channels
 
     def compute(self, injection_parameters, *, duration, delta_t, use_gpu=None):
         sigmas, cov, order = get_parameter_precision(
             injection_parameters, duration=duration, delta_t=delta_t,
-            use_gpu=use_gpu, tdi=self.tdi)
+            use_gpu=use_gpu, tdi=self.tdi, foreground=self.foreground,
+            channels=self.channels)
         return FisherResult(sigmas=sigmas, cov=cov, order=order)
 
 
 def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
-                            use_gpu=None, tdi="2nd generation"):
+                            use_gpu=None, tdi="2nd generation",
+                            foreground=True, channels=None):
     # use_gpu=None -> auto-detect a usable CUDA device; True/False forces it.
     # This is the single switch: it drives StableEMRIFisher's own array backend
     # AND force_backend on the waveform (FastKerr), response (ResponseWrapper) and
@@ -119,17 +125,18 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
     # with longer signals we care less about this
     t0 = 20000.0  # throw away on both ends when our orbital information is weird
 
-    if tdi == "off":
-        from lisatools.sensitivity import LISASens
+    sens_classes, channels = sensitivity_spec(tdi, channels)
+    extra_sef_kwargs = dict(
+        noise_model=channel_noise_psd,
+        noise_kwargs=per_channel_noise_kwargs(T, foreground, sens_classes),
+        channels=channels,
+    )
 
+    if tdi == "off":
         ResponseWrapper = None
         ResponseWrapper_kwargs = None
-        extra_sef_kwargs = dict(
-            noise_model=LISASens.get_Sn,
-            noise_kwargs={},
-            channels=["I", "II"],
-        )
-        logger.info("fisher: tdi off (no ResponseWrapper, sky-averaged PSD)")
+        logger.info("fisher: tdi off (no ResponseWrapper, channels %s, "
+                    "foreground=%s)", channels, foreground)
     else:
         # ResponseWrapper's home depends on the lisatools version: newer trees
         # expose it as lisatools.response, older/installed ones still re-export
@@ -146,7 +153,7 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
             orbits=EqualArmlengthOrbits(force_backend=force_backend),
             order=25,
             tdi=tdi,
-            tdi_chan="AE",
+            tdi_chan="".join(channels),
         )
         ResponseWrapper_kwargs = dict(
             Tobs=T,
@@ -163,7 +170,8 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
             remove_garbage="zero",
             **tdi_kwargs,
         )
-        extra_sef_kwargs = {}
+        logger.info("fisher: tdi %s (channels %s, foreground=%s)",
+                    tdi, channels, foreground)
 
     der_order = 4
     Ndelta = 8
@@ -212,8 +220,6 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
     )
 
     param_cov = np.linalg.inv(fisher_matrix)
-    if tdi == "off":
-        param_cov = param_cov * 2.0
     key_map = {
         "m1": "mass_1",
         "m2": "mass_2",

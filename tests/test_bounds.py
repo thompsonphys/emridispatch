@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from emridispatch.bounds import (
-    build_prior_bounds, load_prior_bounds, save_prior_bounds)
+    build_prior_bounds, fisher_cache_key, load_prior_bounds, save_prior_bounds)
 from emridispatch.parameters import INTRINSIC_ORDER, NDIM
 from emridispatch.reparam import Reparam
 
@@ -72,6 +72,64 @@ def test_load_mode_mismatch_raises(tmp_path):
                       reparam_mode="auto")
     with pytest.raises(ValueError, match="reparam mode"):
         load_prior_bounds(path, NDIM, IDX, "grid")
+
+
+def _save(path, fisher_key=None):
+    mins, maxes, sample_cov, reparam = _build()
+    save_prior_bounds(path, mins, maxes, sample_cov, reparam,
+                      box_scale=3.0, prec_dict=PREC, injection_parameters=INJ,
+                      reparam_mode="auto", fisher_key=fisher_key)
+
+
+def test_fisher_key_null_channels_matches_default():
+    assert (fisher_cache_key("2nd generation", True, 1.0, 10.0, None)
+            == fisher_cache_key("2nd generation", True, 1.0, 10.0, ["A", "E"]))
+
+
+def test_fisher_key_varies_with_each_ingredient():
+    base = fisher_cache_key("2nd generation", True, 1.0, 10.0, ["A", "E"])
+    others = [
+        fisher_cache_key("1st generation", True, 1.0, 10.0, ["A", "E"]),
+        fisher_cache_key("2nd generation", False, 1.0, 10.0, ["A", "E"]),
+        fisher_cache_key("2nd generation", True, 2.0, 10.0, ["A", "E"]),
+        fisher_cache_key("2nd generation", True, 1.0, 5.0, ["A", "E"]),
+        fisher_cache_key("2nd generation", True, 1.0, 10.0, ["A", "E", "T"]),
+    ]
+    assert len(set(others) | {base}) == len(others) + 1
+
+
+def test_fisher_key_ignores_channels_when_tdi_off():
+    assert (fisher_cache_key("off", True, 1.0, 10.0, None)
+            == fisher_cache_key("off", True, 1.0, 10.0, ["A", "E", "T"]))
+
+
+def test_fisher_key_roundtrip(tmp_path):
+    path = str(tmp_path / "prior_bounds.npz")
+    key = fisher_cache_key("off", False, 1.0, 10.0, None)
+    _save(path, fisher_key=key)
+    mins, maxes, _, _, mode = load_prior_bounds(
+        path, NDIM, IDX, "auto", fisher_key=key)
+    assert mode == "auto" and mins.shape == (NDIM,) and maxes.shape == (NDIM,)
+
+
+def test_fisher_key_mismatch_raises(tmp_path):
+    path = str(tmp_path / "prior_bounds.npz")
+    _save(path, fisher_key=fisher_cache_key("off", False, 1.0, 10.0, None))
+    with pytest.raises(ValueError, match="Fisher-relevant config"):
+        load_prior_bounds(path, NDIM, IDX, "auto",
+                          fisher_key=fisher_cache_key(
+                              "2nd generation", True, 1.0, 10.0, None))
+
+
+def test_legacy_cache_without_fisher_key_warns(tmp_path, caplog):
+    path = str(tmp_path / "prior_bounds.npz")
+    _save(path)
+    with caplog.at_level("WARNING"):
+        mins, _, _, _, _ = load_prior_bounds(
+            path, NDIM, IDX, "auto",
+            fisher_key=fisher_cache_key("off", False, 1.0, 10.0, None))
+    assert mins.shape == (NDIM,)
+    assert any("fisher_key" in r.getMessage() for r in caplog.records)
 
 
 def test_mode_off_identity(tmp_path):

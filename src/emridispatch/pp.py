@@ -116,6 +116,7 @@ def ensure_reference_cache(cfg, outroot):
     logger.info("building reference prior box (one-off Fisher at the fiducial "
                 "injection)...")
     from emridispatch.fisher import get_fisher_provider
+    from emridispatch.pipeline import fisher_key_from_config
     from emridispatch.response import build_injection_model
 
     box_scale = float(cfg.prior.box_scale)
@@ -133,7 +134,8 @@ def ensure_reference_cache(cfg, outroot):
     save_prior_bounds(ref_cache, mins, maxes, sample_cov, reparam,
                       box_scale=box_scale, prec_dict=fisher.sigmas,
                       injection_parameters=model.injection_parameters,
-                      reparam_mode=cfg.reparam.mode)
+                      reparam_mode=cfg.reparam.mode,
+                      fisher_key=fisher_key_from_config(cfg))
     logger.info("reference cache built (box_scale=%g, provider=%s) -> %s",
                 box_scale, provider.name, ref_cache)
     return ref_cache

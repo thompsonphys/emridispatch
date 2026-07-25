@@ -44,6 +44,9 @@ data:
                     # TDI generation for response AND sensitivity (default 2nd)
                     # NB: the likelihood previously hardcoded 1st generation, so
                     # omitting this key now gives 2nd, not 1st
+  foreground: true  # add the galactic confusion foreground to the PSD, fitted
+                    # for data.duration. Applies to BOTH the likelihood and the
+                    # Fisher, for every tdi setting.
   add_noise: false  # add a Gaussian noise realization drawn from the PSD
   noise_seed: 0     # dedicated noise seed -- independent of run.seed
 

@@ -12,6 +12,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from emridispatch.noise import (
+    load_sensitivity_table, noise_sens_kwargs, sensitivity_spec)
 from emridispatch.parameters import mass1_mass2_from_log_masses
 from emridispatch.response import InjectionModel
 
@@ -22,14 +24,13 @@ def _import_lisatools():
     try:
         from lisatools.datacontainer import DataResidualArray
         from lisatools.domains import TDSettings
-        from lisatools.sensitivity import (
-            SensitivityMatrix, A1TDISens, E1TDISens, T1TDISens,
-            A2TDISens, E2TDISens, T2TDISens, LISASens)
+        from lisatools.sensitivity import SensitivityMatrix
         from lisatools.analysiscontainer import AnalysisContainer
         from lisatools.diagnostic import inner_product, noise_likelihood_term
         from lisatools.sources.emri import EMRITDIWaveform
-        from lisatools.utils.constants import YRSID_SI
         from few.waveform.waveform import GenerateEMRIWaveform
+
+        sens_table = load_sensitivity_table()
     except ImportError as err:
         raise ImportError(
             "lisa-analysis-tools (and FastEMRIWaveforms) are required for the "
@@ -40,17 +41,12 @@ def _import_lisatools():
         DataResidualArray=DataResidualArray,
         TDSettings=TDSettings,
         SensitivityMatrix=SensitivityMatrix,
-        sens_by_channel={
-            "1st generation": {"A": A1TDISens, "E": E1TDISens, "T": T1TDISens},
-            "2nd generation": {"A": A2TDISens, "E": E2TDISens, "T": T2TDISens},
-        },
-        LISASens=LISASens,
         GenerateEMRIWaveform=GenerateEMRIWaveform,
         AnalysisContainer=AnalysisContainer,
         inner_product=inner_product,
         noise_likelihood_term=noise_likelihood_term,
         EMRITDIWaveform=EMRITDIWaveform,
-        YRSID_SI=YRSID_SI,
+        sens_table=sens_table,
     )
 
 
@@ -62,7 +58,7 @@ class _DirectEMRIWaveform:
 
     def __call__(self, *params):
         h = self.gen(*params, T=self.T, dt=self.dt)
-        return [h.real]
+        return [h.real, -h.imag]
 
 
 def _build_waveform_and_sens(lt, tdi, channel_list, duration, delta_t):
@@ -71,22 +67,12 @@ def _build_waveform_and_sens(lt, tdi, channel_list, duration, delta_t):
             logger.info("tdi off: ignoring data.channels %s", channel_list)
         gen = lt.GenerateEMRIWaveform(
             "FastKerrEccentricEquatorialFlux",
-            sum_kwargs=dict(pad_output=True), return_list=False)
-        return (_DirectEMRIWaveform(gen, duration, delta_t),
-                ["I"], [lt.LISASens])
+            sum_kwargs=dict(pad_output=True), return_list=False,
+            frame="detector")
+        sens, channels = sensitivity_spec("off", None, lt.sens_table)
+        return _DirectEMRIWaveform(gen, duration, delta_t), channels, sens
 
-    channels = ["A", "E"] if channel_list is None else list(channel_list)
-    gen_sens = lt.sens_by_channel.get(tdi)
-    if gen_sens is None:
-        raise ValueError(
-            f"unknown TDI generation {tdi!r}; choose from "
-            f"{sorted(lt.sens_by_channel)}")
-    try:
-        sens = [gen_sens[c] for c in channels]
-    except KeyError as err:
-        raise ValueError(
-            f"unknown TDI channel {err.args[0]!r}; choose from "
-            f"{sorted(gen_sens)}") from err
+    sens, channels = sensitivity_spec(tdi, channel_list, lt.sens_table)
     wf = lt.EMRITDIWaveform(
         response_kwargs=dict(
             t0=30000.0, tdi=tdi, tdi_chan="".join(channels)),
@@ -103,6 +89,7 @@ class EMRIInjectionGenerator:
         injection_snr=None,
         channel_list=None,
         tdi="2nd generation",
+        foreground=True,
         full_likelihood=False,
         add_noise=False,
         noise_seed=0,
@@ -127,6 +114,7 @@ class EMRIInjectionGenerator:
         # (e.g. evidence / thermodynamic integration).
         self.full_likelihood = full_likelihood
         self.tdi = tdi
+        self.foreground = foreground
 
         self.waveform_generator, self.channel_list, self.sensetivity_list = (
             _build_waveform_and_sens(
@@ -134,7 +122,9 @@ class EMRIInjectionGenerator:
         self.channel_string = "".join(self.channel_list)
 
         if self.tdi == "off":
-            logger.info("tdi: off (direct h+ channel, sky-averaged LISASens)")
+            logger.info(
+                "tdi: off (direct channels %s, sky-averaged LISASens)",
+                ", ".join(self.channel_list))
         else:
             _response = self.waveform_generator.response
             logger.info(
@@ -223,7 +213,7 @@ class EMRIInjectionGenerator:
         self.sensetivity_matrix = self._lt.SensitivityMatrix(
             self._data_residual_array.settings,
             self.sensetivity_list,
-            stochastic_params=(self.duration * self._lt.YRSID_SI,),
+            **noise_sens_kwargs(self.duration, self.foreground),
         )
         self._analysis_container = self._lt.AnalysisContainer(
             self._data_residual_array,
@@ -378,6 +368,7 @@ class LisatoolsEMRILikelihood(EMRIInjectionGenerator, InjectionModel):
             injection_snr=cfg.data.inj_snr,
             channel_list=None if _channels is None else list(_channels),
             tdi=str(getattr(cfg.data, "tdi", "2nd generation")),
+            foreground=bool(getattr(cfg.data, "foreground", True)),
             add_noise=bool(getattr(cfg.data, "add_noise", False)),
             noise_seed=int(getattr(cfg.data, "noise_seed", 0)),
         )

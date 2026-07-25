@@ -20,6 +20,7 @@ import os
 
 import numpy as np
 
+from emridispatch.noise import DEFAULT_TDI_CHANNELS, DIRECT_CHANNELS
 from emridispatch.parameters import ANGLE_RANGES, INTRINSIC_ORDER, LOG_PARAMS
 from emridispatch.reparam import Reparam, GridReparam
 
@@ -32,6 +33,18 @@ DEFAULT_BOX_SCALE = 3.0
 
 def cache_path(outdir):
     return os.path.join(outdir, CACHE_NAME)
+
+
+def fisher_cache_key(tdi, foreground, duration, delta_t, channels):
+    names = DIRECT_CHANNELS if tdi == "off" else list(
+        DEFAULT_TDI_CHANNELS if channels is None else channels)
+    return "|".join([
+        f"tdi={tdi}",
+        f"foreground={bool(foreground)}",
+        f"duration={float(duration):.12g}",
+        f"delta_t={float(delta_t):.12g}",
+        f"channels={','.join(names)}",
+    ])
 
 
 def _box_from_ingredients(center, sigmas, box_scale):
@@ -104,12 +117,14 @@ def build_prior_bounds(prec_dict, cov_lin, cov_order, injection_parameters,
 
 def save_prior_bounds(path, mins, maxes, sample_cov, reparam,
                       box_scale=None, prec_dict=None, injection_parameters=None,
-                      reparam_mode=None):
+                      reparam_mode=None, fisher_key=None):
     """Cache the box + proposal + reparam. When the Fisher ingredients are given,
     also store box_scale / center / sigmas so a later run with a different
     prior.box_scale can re-derive the box without re-running the Fisher.
     reparam_mode is stored so a resume can detect that its cached transform was
-    built in a different coordinate system (auto vs grid)."""
+    built in a different coordinate system (auto vs grid). fisher_key (see
+    fisher_cache_key) is stored so a resume can detect that the cached bounds
+    were computed under a different Fisher-relevant configuration."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     extra = {}
     if box_scale is not None and prec_dict is not None and injection_parameters is not None:
@@ -117,13 +132,15 @@ def save_prior_bounds(path, mins, maxes, sample_cov, reparam,
         extra = dict(box_scale=float(box_scale), box_center=center, box_sigmas=sigmas)
     if reparam_mode is not None:
         extra["reparam_mode"] = str(reparam_mode)
+    if fisher_key is not None:
+        extra["fisher_key"] = str(fisher_key)
     np.savez(path, mins=mins, maxes=maxes, sample_cov=sample_cov,
              reparam_idx=reparam.idx, reparam_R=reparam.R,
              reparam_sig=reparam.sig, reparam_mu=reparam.mu, **extra)
 
 
 def load_prior_bounds(path, ndim, reparam_idx, reparam_mode,
-                      box_scale=DEFAULT_BOX_SCALE):
+                      box_scale=DEFAULT_BOX_SCALE, fisher_key=None):
     """Resume-path load. Returns (mins, maxes, sample_cov, reparam, reparam_mode).
 
     If the requested box_scale differs from the cached one and the cache carries
@@ -131,9 +148,29 @@ def load_prior_bounds(path, ndim, reparam_idx, reparam_mode,
     re-run). Tolerates older caches: a missing sample_cov -> a diagonal
     box-scaled proposal; a missing reparam transform -> reparam_mode downgraded
     to 'off' (so a fresh run is needed to regenerate the whitening).
+
+    When fisher_key is given it is checked against the one stored at save time:
+    a mismatch raises ValueError; a cache predating the field warns and proceeds.
     """
     cache = np.load(path)
     mins, maxes = cache["mins"], cache["maxes"]
+
+    if fisher_key is not None:
+        if "fisher_key" in cache.files:
+            stored_key = str(cache["fisher_key"])
+            if stored_key != str(fisher_key):
+                raise ValueError(
+                    f"prior-bounds cache at {path} was built under a different "
+                    f"Fisher-relevant config: cached '{stored_key}' but this run "
+                    f"requests '{fisher_key}'. The cached bounds do not describe "
+                    f"this measurement -- delete the cache (or the outdir) to "
+                    f"rebuild.")
+        else:
+            logger.warning(
+                "resuming: cache at %s predates the fisher_key fingerprint, so "
+                "its bounds cannot be checked against this run's config (%s); "
+                "delete the cache to rebuild if the config changed",
+                path, fisher_key)
 
     if "box_scale" in cache.files:
         stored_scale = float(cache["box_scale"])

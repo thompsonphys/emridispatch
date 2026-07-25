@@ -26,7 +26,8 @@ import numpy as np
 from emridispatch.backends import get_backend
 from emridispatch.backends.base import SamplingProblem
 from emridispatch.bounds import (
-    build_prior_bounds, cache_path, load_prior_bounds, save_prior_bounds)
+    build_prior_bounds, cache_path, fisher_cache_key, load_prior_bounds,
+    save_prior_bounds)
 from emridispatch.fisher import get_fisher_provider
 from emridispatch.parameters import NDIM, PARAM_NAMES, truth_vector
 from emridispatch.priors import joint_prior_from_box
@@ -119,6 +120,15 @@ def _write_injection_truth(outdir, inj_params, truth_vec):
         json.dump(truth, fh, indent=2)
 
 
+def fisher_key_from_config(cfg):
+    channels = getattr(cfg.data, "channels", None)
+    return fisher_cache_key(
+        str(getattr(cfg.data, "tdi", "2nd generation")),
+        bool(getattr(cfg.data, "foreground", True)),
+        cfg.data.duration, cfg.data.delta_t,
+        None if channels is None else list(channels))
+
+
 def build_problem(cfg, resume=True):
     """Construct a backend-agnostic SamplingProblem from a loaded config.
 
@@ -149,9 +159,11 @@ def build_problem(cfg, resume=True):
     # Prior-bounds cache: compute the (possibly expensive) Fisher box once,
     # reuse thereafter.
     bounds_cache = cache_path(outdir)
+    fisher_key = fisher_key_from_config(cfg)
     if resume and os.path.exists(bounds_cache):
         mins, maxes, sample_cov, reparam, reparam_mode = load_prior_bounds(
-            bounds_cache, ndim, reparam_idx, reparam_mode, box_scale=box_scale)
+            bounds_cache, ndim, reparam_idx, reparam_mode, box_scale=box_scale,
+            fisher_key=fisher_key)
         logger.info("resuming: loaded cached prior bounds + proposal from %s "
                     "(Fisher skipped)", bounds_cache)
     else:
@@ -168,7 +180,7 @@ def build_problem(cfg, resume=True):
         save_prior_bounds(bounds_cache, mins, maxes, sample_cov, reparam,
                           box_scale=box_scale, prec_dict=fisher.sigmas,
                           injection_parameters=model.injection_parameters,
-                          reparam_mode=reparam_mode)
+                          reparam_mode=reparam_mode, fisher_key=fisher_key)
         logger.info("first run: computed prior bounds + proposal via %r "
                     "(box_scale=%g), cached to %s",
                     provider.name, box_scale, bounds_cache)

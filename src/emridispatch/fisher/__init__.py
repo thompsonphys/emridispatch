@@ -87,9 +87,12 @@ def get_fisher_provider(cfg):
     if kind == "sef":
         from emridispatch.fisher.sef import SEFFisherProvider
 
-        tdi = str(getattr(getattr(cfg, "data", SimpleNamespace()),
-                          "tdi", "2nd generation"))
-        return SEFFisherProvider(tdi=tdi)
+        data = getattr(cfg, "data", SimpleNamespace())
+        _channels = getattr(data, "channels", None)
+        return SEFFisherProvider(
+            tdi=str(getattr(data, "tdi", "2nd generation")),
+            foreground=bool(getattr(data, "foreground", True)),
+            channels=None if _channels is None else list(_channels))
     if kind == "manual":
         return _manual.ManualFisherProvider.from_config(cfg)
     if kind in ("none", "heuristic"):
