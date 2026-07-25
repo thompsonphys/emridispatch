@@ -38,8 +38,18 @@ uv pip install -e ".[all]"             # everything (same extras as above)
 ```
 
 Everything heavy is optional and imported lazily; a missing extra produces a
-clear install hint at the point of use. If e.g. `impulse-mcmc` / `stableemrifisher` are
+clear install hint at the point of use. If e.g. [impulse-mcmc](https://github.com/AaronDJohnson/impulse_mcmc) / [StableEMRIFisher](https://github.com/perturber/StableEMRIFisher) are
 not on PyPI in your environment, install them from their git sources first.
+
+Note: at the moment, compatability between [lisa-analysis-tools](https://github.com/lisa-analysis-tools/lisa-analysis-tools) (for TDI/response), 
+`StableEMRIFisher` (for Fisher) and [FastEMRIWaveforms](https://github.com/BlackHolePerturbationToolkit/FastEMRIWaveforms) (for the signal model)
+is unstable. I suggest installing the following code
+from my forks, where compatability with FEW v2.0.0 should be maintained for now:
+```
+https://github.com/thompsonphys/GPUBackendTools (spline branch)
+https://github.com/thompsonphys/lisa-analysis-tools (dev branch)
+https://github.com/thompsonphys/StableEMRIFisher
+```
 
 ## Run
 
