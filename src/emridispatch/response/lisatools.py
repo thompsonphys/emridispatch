@@ -222,19 +222,22 @@ class EMRIInjectionGenerator:
                 bad |= (vp < med - self.psd_notch_depth).reshape(-1)[:nf]
         if not bad.any():
             return None
-        centres = f[bad]
-        lo = np.searchsorted(f, centres - width, side="left")
-        hi = np.searchsorted(f, centres + width, side="right")
+        idx = np.flatnonzero(bad)
+        groups = np.split(idx, np.flatnonzero(np.diff(idx) > 1) + 1)
         mask = np.zeros(nf, dtype=bool)
-        for a, b in zip(lo, hi):
+        for g in groups:
+            a = np.searchsorted(f, f[g[0]] - width, side="left")
+            b = np.searchsorted(f, f[g[-1]] + width, side="right")
             mask[a:b] = True
-        logger.info(
-            "psd notch: %d null bin(s) at %s Hz -> masking %d/%d bins "
-            "(half-width %g Hz, depth %g decades)",
-            int(bad.sum()),
-            np.array2string(np.unique(centres.round(9)), precision=7,
-                            max_line_width=120),
-            int(mask.sum()), nf, width, self.psd_notch_depth)
+        if _width is None:
+            shown = ", ".join(f"{f[g].mean():.6g}" for g in groups[:4])
+            if len(groups) > 4:
+                shown += f", ... (+{len(groups) - 4} more)"
+            logger.info(
+                "psd notch: %d null(s) at %s Hz -> %d/%d bins masked "
+                "(half-width %g Hz, depth %g decades)",
+                len(groups), shown, int(mask.sum()), nf, width,
+                self.psd_notch_depth)
         return mask
 
     def _apply_psd_notch(self):
