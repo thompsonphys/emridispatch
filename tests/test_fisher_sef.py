@@ -158,6 +158,33 @@ def test_wiring_tdi_2nd_generation_aet(recorded_sef):
     assert seen["waveform_generator_kwargs"]["frame"] == "detector"
 
 
+def _ill_conditioned_fisher():
+    rot = np.linalg.qr(np.arange(1.0, 37.0).reshape(6, 6) + 7.0 * np.eye(6))[0]
+    return rot @ np.diag(np.geomspace(1.0, 1e-12, 6)) @ rot.T
+
+
+def test_covariance_is_exactly_symmetric(monkeypatch):
+    pytest.importorskip("few")
+    stableemrifisher = pytest.importorskip("stableemrifisher.fisher")
+
+    gamma = _ill_conditioned_fisher()
+    raw = np.linalg.inv(gamma)
+    assert not np.array_equal(raw, raw.T)
+
+    class _FixedFisher(_Recorder):
+        def __call__(self, *args, **kwargs):
+            return gamma
+
+    monkeypatch.setattr(stableemrifisher, "StableEMRIFisher", _FixedFisher)
+    sigmas, cov, order = sef_mod.get_parameter_precision(
+        INJ, duration=0.3, delta_t=10.0, use_gpu=False, tdi="off")
+
+    assert np.array_equal(cov, cov.T)
+    np.testing.assert_allclose(cov, 0.5 * (raw + raw.T), rtol=0, atol=0)
+    np.testing.assert_allclose(
+        [sigmas[k] for k in order], np.sqrt(np.diag(cov)), rtol=0, atol=0)
+
+
 def test_wiring_tdi_default_channels(recorded_sef):
     pytest.importorskip("lisatools.response")
 

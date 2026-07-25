@@ -133,6 +133,13 @@ class ErynBackend:
         thin_by = int(e.thin_by)
         progress = bool(e.progress)
         start_spread = float(e.start_spread)
+        if nwalkers < 2 * problem.ndim:
+            raise ValueError(
+                f"sampler.eryn.nwalkers must be at least 2*ndim = "
+                f"{2 * problem.ndim} (got {nwalkers}): eryn's red-blue stretch "
+                "move splits the ensemble into two halves and each half must "
+                "span the parameter space")
+
         move = str(e.move).lower()
         if move != "stretch":
             raise ValueError(

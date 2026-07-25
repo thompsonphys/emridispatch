@@ -220,6 +220,7 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
     )
 
     param_cov = np.linalg.inv(fisher_matrix)
+    param_cov = 0.5 * (param_cov + param_cov.T)
     key_map = {
         "m1": "mass_1",
         "m2": "mass_2",

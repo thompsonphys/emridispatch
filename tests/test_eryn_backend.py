@@ -90,6 +90,31 @@ def test_eryn_backend_end_to_end_and_resume(toy_cfg):
         assert int(f["mcmc"].attrs["iteration"]) == 40
 
 
+def test_eryn_backend_rejects_too_few_walkers(toy_cfg):
+    pytest.importorskip("eryn")
+    from emridispatch.backends import get_backend
+    from emridispatch.pipeline import build_problem
+
+    toy_cfg.sampler.backend = "eryn"
+    toy_cfg.sampler.eryn.nwalkers = 2 * NDIM - 2
+    problem = build_problem(toy_cfg)
+    with pytest.raises(ValueError, match=f"nwalkers.*{2 * NDIM}"):
+        get_backend("eryn").run(problem, toy_cfg, resume=False)
+
+
+def test_eryn_backend_accepts_exactly_twice_ndim_walkers(toy_cfg):
+    pytest.importorskip("eryn")
+    from emridispatch.backends import get_backend
+    from emridispatch.pipeline import build_problem
+
+    toy_cfg.sampler.backend = "eryn"
+    toy_cfg.sampler.nsamples = 2
+    toy_cfg.sampler.eryn.nwalkers = 2 * NDIM
+    problem = build_problem(toy_cfg)
+    summary = get_backend("eryn").run(problem, toy_cfg, resume=False)
+    assert summary is not None
+
+
 def test_eryn_backend_rejects_unknown_move(toy_cfg):
     pytest.importorskip("eryn")
     from emridispatch.backends import get_backend
