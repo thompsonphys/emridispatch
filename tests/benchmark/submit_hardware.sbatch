@@ -92,6 +92,54 @@ nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv \
 echo "--- lscpu ---"
 lscpu | tee "$RESULTS/lscpu.txt" | grep -E "Model name|MHz|Socket|Core|Thread" || true
 
+# ---- preflight: cupy loads its CUDA libs lazily, so a missing libcufft only
+# ---- surfaces at the first FFT, minutes into a run. Probe each one up front.
+if [[ "${SKIP_PREFLIGHT:-0}" != 1 && -n "${CUDA_VISIBLE_DEVICES:-}" ]]; then
+    echo "--- cupy preflight ---"
+    if ! python - <<'PY' 2>&1 | tee "$RESULTS/preflight.log"
+import sys
+
+import cupy as cp
+
+print("cupy", cp.__version__, "/ runtime", cp.cuda.runtime.runtimeGetVersion())
+print("device", cp.cuda.runtime.getDeviceProperties(0)["name"].decode())
+
+checks = {
+    "cudart": lambda: cp.arange(8.0) + 1,
+    "cublas": lambda: cp.eye(4) @ cp.eye(4),
+    "cufft": lambda: cp.fft.rfft(cp.arange(8.0)),
+    "cusolver": lambda: cp.linalg.cholesky(cp.eye(4)),
+    "curand": lambda: cp.random.standard_normal(8),
+    "nvrtc": lambda: cp.ElementwiseKernel("float64 x", "float64 y", "y = x * 2", "pf")(
+        cp.arange(8.0)
+    ),
+}
+
+bad = []
+for name, fn in checks.items():
+    try:
+        fn()
+        cp.cuda.Stream.null.synchronize()
+        print(f"  {name:9s} ok")
+    except Exception as exc:
+        bad.append(name)
+        print(f"  {name:9s} FAIL  {type(exc).__name__}: {exc}".splitlines()[0])
+
+if bad:
+    print(f"unusable GPU stack: {', '.join(bad)}")
+    sys.exit(1)
+PY
+    then
+        echo
+        echo "preflight FAILED -- aborting before the benchmark burns walltime."
+        echo "install the missing CUDA 12 runtime libs into \$CONDA_ENV, e.g."
+        echo "  conda install -n $CONDA_ENV -c conda-forge libcufft libcusolver libcurand"
+        echo "  # or: pip install nvidia-cufft-cu12 nvidia-cusolver-cu12 nvidia-curand-cu12"
+        echo "re-run with SKIP_PREFLIGHT=1 to bypass this check."
+        exit 1
+    fi
+fi
+
 # ---- sample SM utilization for the whole job ------------------------------
 # Sustained SM% below ~20 during the waveform stages means the GPU is
 # launch-latency bound, not compute bound.
