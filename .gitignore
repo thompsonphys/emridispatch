@@ -49,3 +49,6 @@ tdi*_wo_background.npy
 
 # chain output
 *chains*/
+
+# benchmark harness output
+slurm-logs/
