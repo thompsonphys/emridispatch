@@ -47,6 +47,69 @@ def _merge_ns(defaults, override, **nested):
     return SimpleNamespace(**{**defaults, **(override or {})}, **nested)
 
 
+DATA_DEFAULTS = {
+    "response": "lisatools",
+    "duration": 1.0,
+    "delta_t": 10.0,
+    "inj_snr": None,
+    "channels": None,
+    "tdi": "2nd generation",
+    "foreground": True,
+    "add_noise": False,
+    "noise_seed": 0,
+    "pad_fft": True,
+    "psd_notch": 1.0e-5,
+    "psd_notch_depth": 2.0,
+    "psd_notch_strict": True,
+    "toy_sigma_scale": 1.0,
+}
+
+
+SAMPLER_DEFAULTS = {
+    "backend": "impulse", "nsamples": 10000,
+    "start_mode": "truth", "start_jitter": 5.0,
+}
+IMPULSE_DEFAULTS = {"threads": 1, "cov_update": 200, "save_freq": 200}
+LADDER_DEFAULTS = {
+    "max_temp": 1000.0, "t_split": 25.0, "ntemps_low": 20,
+    "ntemps_high": 6, "adapt": False, "adapt_nu": 10.0, "adapt_t0": 100.0,
+}
+MODE_JUMP_DEFAULTS = {"method": "none", "weight": 25.0}
+ERYN_DEFAULTS = {
+    "nwalkers": 32, "ntemps": 1, "Tmax": None,
+    "adaptive_temps": True, "adaptation_lag": 10000,
+    "adaptation_time": 100, "stop_adaptation": -1, "burn": 0,
+    "thin_by": 1, "progress": False, "start_spread": 1.0, "move": "stretch",
+}
+PRIOR_DEFAULTS = {
+    "box_scale": 3.0, "fisher": "auto", "angle_sigma": 0.05,
+    "fisher_use_gpu": None, "periodic_2pi_indices": None,
+    "sigmas": None, "covariance_file": None,
+}
+INJECTION_KEYS = (
+    "mass_1", "mass_2", "a", "p", "e", "x", "luminosity_distance",
+    "q_s", "phi_s", "q_k", "phi_k", "phi_phi", "phi_theta", "phi_r",
+)
+REPARAM_KEYS = ("mode", "idx")
+RUN_KEYS = ("outdir", "seed")
+LOGGING_DEFAULTS = {"level": "INFO", "file": "run.log"}
+PP_KEYS = ("nruns", "outroot", "draw_seed", "nsamples", "burn_frac")
+
+
+def _check_keys(section, raw, allowed):
+    unknown = sorted(set(raw or ()) - set(allowed))
+    if unknown:
+        import difflib
+
+        hints = []
+        for key in unknown:
+            near = difflib.get_close_matches(key, allowed, n=1, cutoff=0.7)
+            hints.append(f"{key!r}" + (f" (did you mean {near[0]!r}?)" if near else ""))
+        raise ValueError(
+            f"unknown key(s) in config section {section!r}: {', '.join(hints)}. "
+            f"Valid keys: {', '.join(sorted(allowed))}")
+
+
 def load_config(path):
     """Return a SimpleNamespace: .injection (dict) plus .data/.sampler/.prior/
     .priors/.reparam/.run/.logging/.pp sections. Backend-specific sampler knobs
@@ -60,52 +123,55 @@ def load_config(path):
     # exponent like `1.0e6` into a string. Normalize the mode string and the
     # float injection scalars so a config typo can't reach the sampler.
     raw["reparam"]["mode"] = _as_mode(raw["reparam"]["mode"])
+    _check_keys("injection", raw["injection"], INJECTION_KEYS)
     raw["injection"] = {k: _as_float(v) for k, v in raw["injection"].items()}
 
     raw_data = dict(raw["data"])
+    _check_keys("data", raw_data, DATA_DEFAULTS)
     raw_data["tdi"] = _as_tdi(raw_data.get("tdi", "2nd generation"))
     raw_data["foreground"] = bool(raw_data.get("foreground", True))
 
     raw_sampler = dict(raw.get("sampler") or {})
     raw_impulse = dict(raw_sampler.pop("impulse", None) or {})
     raw_eryn = raw_sampler.pop("eryn", None) or {}
+    raw_ladder = raw_impulse.get("ladder") or {}
+    raw_mode_jump = raw_impulse.get("mode_jump") or {}
+
+    _check_keys("sampler", raw_sampler, SAMPLER_DEFAULTS)
+    _check_keys("sampler.impulse",
+                {k: v for k, v in raw_impulse.items()
+                 if k not in ("ladder", "mode_jump")}, IMPULSE_DEFAULTS)
+    _check_keys("sampler.impulse.ladder", raw_ladder, LADDER_DEFAULTS)
+    _check_keys("sampler.impulse.mode_jump", raw_mode_jump, MODE_JUMP_DEFAULTS)
+    _check_keys("sampler.eryn", raw_eryn, ERYN_DEFAULTS)
+    _check_keys("prior", raw.get("prior"), PRIOR_DEFAULTS)
+    _check_keys("reparam", raw.get("reparam"), REPARAM_KEYS)
+    _check_keys("run", raw.get("run"), RUN_KEYS)
+    _check_keys("logging", raw.get("logging"), LOGGING_DEFAULTS)
+    _check_keys("pp", raw.get("pp"), PP_KEYS)
 
     sampler = _merge_ns(
-        {"backend": "impulse", "nsamples": 10000,
-         "start_mode": "truth", "start_jitter": 5.0},
+        SAMPLER_DEFAULTS,
         raw_sampler,
         impulse=_merge_ns(
-            {"threads": 1, "cov_update": 200, "save_freq": 200},
+            IMPULSE_DEFAULTS,
             {k: v for k, v in raw_impulse.items()
              if k not in ("ladder", "mode_jump")},
-            ladder=_merge_ns(
-                {"max_temp": 1000.0, "t_split": 25.0, "ntemps_low": 20,
-                 "ntemps_high": 6, "adapt": False, "adapt_nu": 10.0,
-                 "adapt_t0": 100.0},
-                raw_impulse.get("ladder")),
-            mode_jump=_merge_ns({"method": "none", "weight": 25.0},
-                                raw_impulse.get("mode_jump"))),
-        eryn=_merge_ns(
-            {"nwalkers": 32, "ntemps": 1, "Tmax": None,
-             "adaptive_temps": True, "adaptation_lag": 10000,
-             "adaptation_time": 100, "stop_adaptation": -1, "burn": 0,
-             "thin_by": 1, "progress": False, "start_spread": 1.0,
-             "move": "stretch"},
-            raw_eryn))
+            ladder=_merge_ns(LADDER_DEFAULTS, raw_ladder),
+            mode_jump=_merge_ns(MODE_JUMP_DEFAULTS, raw_mode_jump)),
+        eryn=_merge_ns(ERYN_DEFAULTS, raw_eryn))
 
     return SimpleNamespace(
         injection=raw["injection"],                     # kept a dict for the generator
-        data=SimpleNamespace(**raw_data),
+        data=_merge_ns(DATA_DEFAULTS, raw_data),
         sampler=sampler,
         prior=_merge_ns(
-            {"box_scale": 3.0, "fisher": "auto", "angle_sigma": 0.05,
-             "fisher_use_gpu": None,
-             "periodic_2pi_indices": list(DEFAULT_PERIODIC_2PI_INDICES)},
+            dict(PRIOR_DEFAULTS,
+                 periodic_2pi_indices=list(DEFAULT_PERIODIC_2PI_INDICES)),
             raw.get("prior")),
         priors=dict(raw.get("priors", {})),             # per-parameter overrides
         reparam=SimpleNamespace(**raw["reparam"]),
         run=SimpleNamespace(**raw["run"]),
-        logging=_merge_ns({"level": "INFO", "file": "run.log"},
-                          raw.get("logging")),
+        logging=_merge_ns(LOGGING_DEFAULTS, raw.get("logging")),
         pp=SimpleNamespace(**raw.get("pp", {})),
     )
