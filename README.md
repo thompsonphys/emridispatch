@@ -82,6 +82,32 @@ run_from_config(cfg, resume=True)
 See `examples/run_impulse.py` and `examples/run_impulse.ipynb` for complete
 templates (with weird env guards, run-dir setup, logging).
 
+### Exploring an injection
+
+Inspect an injection's SNR and likelihood without running a sampler:
+
+```python
+from emridispatch.workbench import load, measure, offset, truth
+
+cfg, model = load("my_config.yaml")
+measure(model, truth(model), per_channel=True)
+measure(model, offset(model, p=+0.01))
+```
+
+Plots (`emridispatch.workbench_plots`) cover time-frequency, characteristic
+strain against the sensitivity curve, cumulative SNR, and time-domain
+residuals. Each takes a `show` tuple selecting which traces to overlay —
+`"template"`, `"injection"`, `"data"` (with the noise realization when
+`data.add_noise` is on) or `"noise"` alone:
+
+```python
+from emridispatch.workbench_plots import plot_char_strain
+
+fig, axes = plot_char_strain(model, show=("noise", "data", "template"))
+```
+
+See `examples/explore_injection.py` and `examples/explore_injection.ipynb`.
+
 ## Postprocess & visualize
 
 ```bash
