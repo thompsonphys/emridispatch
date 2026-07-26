@@ -407,6 +407,18 @@ class EMRIInjectionGenerator:
     def generate_signal(self, params):
         return self._produce_data_residual_array(params=params)
 
+    def generate_time_domain(self, params):
+        """(times, strain) for a physical-parameter dict, on the host.
+
+        strain has shape (nchannels, N) at the generator's native length, before
+        the FFT padding applied by _pad_to_fft_length.
+        """
+        channels = self.waveform_generator(*self._get_params(params))
+        strain = np.asarray([
+            np.asarray(c.get() if hasattr(c, "get") else c) for c in channels])
+        times = np.arange(strain.shape[-1]) * self.delta_t
+        return times, strain
+
     def evaluate_likelihood(self, input, full=None):
         """Log-likelihood for a template.
 

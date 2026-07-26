@@ -1,0 +1,353 @@
+"""Injection and template diagnostic plots for the workbench.
+
+Four views of one parameter set against the injected data:
+
+    plot_time_frequency    STFT of the time-domain strain
+    plot_char_strain       f|h(f)| over the sensitivity curve
+    plot_snr_accumulation  cumulative SNR against frequency
+    plot_time_domain       h(t), or the residual d - h
+
+Every plot takes the injection model, an optional parameter set (None means the
+injection itself), and a `show` tuple naming which traces to overlay:
+
+    "template"   the parameter set passed in; noise-free
+    "injection"  the noiseless injected signal
+    "data"       model.data_residual_array; carries noise when add_noise is on
+    "noise"      d - h_injection, the realization alone
+
+All return (fig, axes) and write no files. Physics knobs are explicit keyword
+arguments, `stft_kwargs` forwards to scipy.signal.stft, and **kwargs forwards to
+the primary matplotlib artist.
+
+Needs matplotlib: pip install emridispatch[viz]
+"""
+
+from __future__ import annotations
+
+import logging
+
+import numpy as np
+
+from emridispatch.workbench import (
+    _arr, _as_template, _f_arr, _host, _require, injection_template, noise,
+    to_physical)
+
+logger = logging.getLogger(__name__)
+
+TRACES = ("template", "injection", "data", "noise")
+
+
+def _require_plotting():
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError as exc:
+        raise ImportError(
+            "workbench plots need matplotlib; install with "
+            "`pip install emridispatch[viz]`") from exc
+    return plt
+
+
+def _check_traces(model, show):
+    names = tuple(show)
+    for name in names:
+        if name not in TRACES:
+            raise ValueError(
+                f"unknown trace {name!r}; choose from {list(TRACES)}")
+    if not names:
+        raise ValueError(f"show must name at least one of {list(TRACES)}")
+    if "data" in names and not getattr(model, "add_noise", False):
+        logger.warning(
+            "data.add_noise is false; the data trace equals the noiseless "
+            "injection")
+    return names
+
+
+def _physical(model, params):
+    if params is None:
+        return dict(model.injection_parameters)
+    if isinstance(params, dict):
+        return params
+    return to_physical(model, params)
+
+
+def _template_spectrum(model, params):
+    """Frequency-domain array of the template for `params`.
+
+    params=None means the injection itself, which routes through the cached
+    injection_template rather than a fresh generate_signal: the model does not
+    cache generate_signal, so every params=None plot would otherwise pay for a
+    full waveform generation.
+    """
+    if params is None:
+        return _arr(injection_template(model))
+    return _arr(_as_template(model, _physical(model, params)))
+
+
+def _spectra(model, params, show):
+    """{trace name: (nchannels, nf) frequency-domain array} for the shown traces."""
+    out = {}
+    if "template" in show:
+        out["template"] = _template_spectrum(model, params)
+    if "injection" in show:
+        out["injection"] = _arr(injection_template(model))
+    if "data" in show:
+        out["data"] = _arr(model.data_residual_array)
+    if "noise" in show:
+        out["noise"] = noise(model)
+    return {name: out[name] for name in show}
+
+
+def _time_domain_length(model):
+    """Time-domain sample count behind the frequency-domain data.
+
+    Read from the data's input_signal_domain rather than inferred from the
+    number of frequency bins: nf = N // 2 + 1 maps both an even N and the odd
+    N + 1 to the same nf, so the bin count cannot recover the parity.
+    """
+    data = model.data_residual_array
+    settings = getattr(data, "init_kwargs", {}).get("input_signal_domain")
+    n = getattr(settings, "N", None)
+    if n is None:
+        raise TypeError(
+            "workbench_plots needs the time-domain length; "
+            "model.data_residual_array exposes no "
+            "init_kwargs['input_signal_domain'].N")
+    return int(n)
+
+
+def _to_time_domain(model, spectrum, n):
+    """Time-domain reconstruction of a frequency-domain trace, trimmed to `n`.
+
+    Amplitude: lisatools builds its frequency-domain arrays with numpy --
+    TDSignal.fft does `rfft(arr * window, axis=-1) * dt` and FDSignal.ifft
+    inverts it with `irfft(arr, axis=-1) / dt`. The 1/dt here is that same
+    factor, so the result carries the strain amplitude of the original series.
+
+    Length: the transform is always taken at the length data_residual_array was
+    built at, which is the zero-padded FFT grid (next_fast_len of the
+    generator's native length), and sliced afterwards. An irfft at the shorter
+    native length instead reinterprets bins spaced 1/(N_pad*dt) as if they were
+    spaced 1/(N_native*dt), which time-compresses the trace into something
+    uncorrelated with the signal. The padding is trailing zeros, so the leading
+    n samples are exact.
+    """
+    full = np.fft.irfft(spectrum, n=_time_domain_length(model), axis=-1)
+    return full[..., :n] / model.delta_t
+
+
+def _time_series(model, params, show, fn):
+    """{trace name: (nchannels, N) time-domain array} for the shown traces."""
+    out = {}
+    times = None
+    if "template" in show or "injection" in show:
+        _require(model, "generate_time_domain", fn)
+    if "template" in show:
+        times, strain = model.generate_time_domain(_physical(model, params))
+        out["template"] = strain
+    if "injection" in show:
+        if params is None and "template" in out:
+            out["injection"] = out["template"]
+        else:
+            times_inj, strain = model.generate_time_domain(
+                dict(model.injection_parameters))
+            times = times_inj if times is None else times
+            out["injection"] = strain
+    if times is None:
+        n = _time_domain_length(model)
+        times = np.arange(n) * model.delta_t
+    else:
+        n = next(iter(out.values())).shape[-1]
+    for name in ("data", "noise"):
+        if name in show:
+            spectrum = (_arr(model.data_residual_array)
+                        if name == "data" else noise(model))
+            out[name] = _to_time_domain(model, spectrum, n)
+    return times, {name: out[name] for name in show}
+
+
+def _channels(model, channel, fn):
+    _require(model, "channel_list", fn)
+    names = list(model.channel_list)
+    if channel is None:
+        return names, list(range(len(names)))
+    if channel not in names:
+        raise ValueError(f"unknown channel {channel!r}; choose from {names}")
+    return [channel], [names.index(channel)]
+
+
+def _axes(plt, ax, n):
+    if ax is not None:
+        axes = np.atleast_1d(ax)
+        return axes[0].get_figure(), axes
+    fig, axes = plt.subplots(n, 1, sharex=True, figsize=(8.0, 2.6 * n))
+    return fig, np.atleast_1d(axes)
+
+
+def _notch_bands(model, show_notch):
+    if not show_notch:
+        return []
+    mask = getattr(model, "_psd_notch_mask", None)
+    if mask is None:
+        return []
+    mask = np.asarray(_host(mask), dtype=bool)
+    if not mask.any():
+        return []
+    f = _f_arr(model.data_residual_array)
+    idx = np.flatnonzero(mask)
+    groups = np.split(idx, np.flatnonzero(np.diff(idx) > 1) + 1)
+    return [(f[g[0]], f[g[-1]]) for g in groups]
+
+
+def _shade(axis, bands):
+    for lo, hi in bands:
+        axis.axvspan(lo, hi, color="0.8", alpha=0.5, zorder=0)
+
+
+def plot_time_frequency(model, params=None, *, show=("template",), channel=None,
+                        stft_kwargs=None, ax=None, **kwargs):
+    """Spectrogram of each shown trace, one panel per channel per trace."""
+    from scipy.signal import stft
+
+    plt = _require_plotting()
+    names = _check_traces(model, show)
+    chan_names, indices = _channels(model, channel, "plot_time_frequency")
+    times, series = _time_series(model, params, names, "plot_time_frequency")
+    fs = 1.0 / float(times[1] - times[0])
+    first = next(iter(series.values()))
+    opts = dict(nperseg=min(256, first.shape[-1]))
+    opts.update(stft_kwargs or {})
+
+    fig, axes = _axes(plt, ax, len(chan_names) * len(names))
+    panel = 0
+    for trace in names:
+        strain = series[trace]
+        for chan_name, i in zip(chan_names, indices):
+            f, t, Z = stft(strain[i], fs=fs, **opts)
+            axes[panel].pcolormesh(t, f, np.abs(Z), shading="auto", **kwargs)
+            axes[panel].set_yscale("log")
+            axes[panel].set_ylabel(f"{trace} {chan_name}  f [Hz]")
+            panel += 1
+    axes[-1].set_xlabel("t [s]")
+    return fig, axes
+
+
+def plot_char_strain(model, params=None, *, show=("template",), show_notch=True,
+                     ax=None, **kwargs):
+    """f|h(f)| against the sensitivity curve, per channel."""
+    plt = _require_plotting()
+    _require(model, "sensetivity_matrix", "plot_char_strain")
+    _require(model, "channel_list", "plot_char_strain")
+    names = _check_traces(model, show)
+    spectra = _spectra(model, params, names)
+    f = _f_arr(model.data_residual_array)
+    sens = np.asarray(_host(model.sensetivity_matrix.sens_mat))
+    bands = _notch_bands(model, show_notch)
+
+    fig, axes = _axes(plt, ax, len(model.channel_list))
+    for i, chan_name in enumerate(model.channel_list):
+        _shade(axes[i], bands)
+        for trace in names:
+            axes[i].loglog(f, f * np.abs(spectra[trace][i]), label=trace,
+                           **kwargs)
+        axes[i].loglog(f, np.sqrt(f * sens[i]), label="sensitivity",
+                       color="0.4", linestyle="--")
+        axes[i].set_ylabel(f"{chan_name}  char. strain")
+        axes[i].legend(loc="best", fontsize="small")
+    axes[-1].set_xlabel("f [Hz]")
+    return fig, axes
+
+
+def plot_snr_accumulation(model, params=None, *, show=("template",),
+                          show_notch=True, ax=None, **kwargs):
+    """Cumulative SNR against frequency, summed over channels.
+
+    "template" and "injection" accumulate optimal SNR and are monotonic. "data"
+    and "noise" accumulate the detected statistic and its noise part; both can
+    decrease and go negative.
+    """
+    plt = _require_plotting()
+    _require(model, "sensetivity_matrix", "plot_snr_accumulation")
+    names = _check_traces(model, show)
+    inv = np.asarray(_host(model.sensetivity_matrix.invC))
+    differential = model.sensetivity_matrix.differential_component
+    f = _f_arr(model.data_residual_array)
+
+    h = None
+    norm = 1.0
+    if set(names) & {"template", "data", "noise"}:
+        h = _template_spectrum(model, params)
+        h_h_total = 0.0
+        for i in range(h.shape[0]):
+            row = np.real(h[i].conj() * h[i]) * inv[i]
+            h_h_total += 4.0 * float(np.nansum(row)) * differential
+        if h_h_total > 0.0:
+            norm = np.sqrt(h_h_total)
+
+    spectra = _spectra(model, params, [n for n in names if n != "template"])
+    if "template" in names:
+        spectra["template"] = h
+    spectra = {name: spectra[name] for name in names}
+
+    fig, axes = _axes(plt, ax, 1)
+    _shade(axes[0], _notch_bands(model, show_notch))
+    for trace in names:
+        arr = spectra[trace]
+        per_bin = np.zeros(f.shape[-1])
+        for i in range(arr.shape[0]):
+            if trace in ("template", "injection"):
+                row = np.real(arr[i].conj() * arr[i]) * inv[i]
+            else:
+                row = np.real(arr[i].conj() * h[i]) * inv[i]
+            per_bin = per_bin + np.nan_to_num(
+                row, nan=0.0, posinf=0.0, neginf=0.0)
+        cumulative = np.cumsum(4.0 * per_bin * differential)
+        curve = (np.sqrt(cumulative) if trace in ("template", "injection")
+                 else cumulative / norm)
+        axes[0].plot(f, curve, label=trace, **kwargs)
+    axes[0].set_xscale("log")
+    axes[0].set_xlabel("f [Hz]")
+    axes[0].set_ylabel("cumulative SNR")
+    axes[0].legend(loc="best", fontsize="small")
+    return fig, axes
+
+
+def plot_time_domain(model, params=None, *, show=("template",), residual=False,
+                     whiten=False, ax=None, **kwargs):
+    """h(t) per channel for each shown trace.
+
+    residual=True replaces the template trace with d - h(params), which differs
+    from the "noise" trace (d - h(injection)) unless params is None.
+    """
+    plt = _require_plotting()
+    _require(model, "channel_list", "plot_time_domain")
+    names = _check_traces(model, show)
+    times, series = _time_series(model, params, names, "plot_time_domain")
+
+    if residual and "template" in series:
+        n = series["template"].shape[-1]
+        data_td = _to_time_domain(model, _arr(model.data_residual_array), n)
+        series = dict(series)
+        series["template"] = data_td - series["template"]
+
+    if whiten:
+        _require(model, "sensetivity_matrix", "plot_time_domain")
+        sens = np.asarray(_host(model.sensetivity_matrix.sens_mat))
+        scale = np.sqrt(np.where(np.isfinite(sens) & (sens > 0), sens, np.inf))
+        whitened = {}
+        for trace, strain in series.items():
+            spec = np.fft.rfft(strain, axis=-1)
+            m = min(spec.shape[-1], scale.shape[-1])
+            spec[:, :m] = spec[:, :m] / scale[:, :m]
+            spec[:, m:] = 0.0
+            whitened[trace] = np.fft.irfft(spec, n=strain.shape[-1], axis=-1)
+        series = whitened
+
+    fig, axes = _axes(plt, ax, len(model.channel_list))
+    for i, chan_name in enumerate(model.channel_list):
+        for trace in names:
+            label = "d - h" if (residual and trace == "template") else trace
+            axes[i].plot(times, series[trace][i], label=label, **kwargs)
+        axes[i].set_ylabel(chan_name)
+        axes[i].legend(loc="best", fontsize="small")
+    axes[-1].set_xlabel("t [s]")
+    return fig, axes
