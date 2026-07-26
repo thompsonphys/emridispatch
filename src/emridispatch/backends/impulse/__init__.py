@@ -1,9 +1,7 @@
 """impulse.PTSampler backend (optional: `pip install emridispatch[impulse]`).
 
-Everything impulse-specific lives here: the temperature ladder geometry, the
-Vousden ladder-adaptation knobs, the custom jump-proposal contract
-(`proposal(chain_stats) -> (q, qxy)`, see mode_jumps), the proposal/swap
-acceptance reporting, and the chain_N.txt output format.
+Custom jump proposals follow `proposal(chain_stats) -> (q, qxy)`.
+Output: chain_N.txt per temperature under outdir.
 """
 
 import json
@@ -30,9 +28,10 @@ class ImpulseBackend:
     name = "impulse"
 
     def run(self, problem, cfg, resume=True):
-        """Build the PTSampler from the SamplingProblem, sample, and write
-        run_summary.json. Returns the summary dict (None if sample() raised a
-        ValueError, mirroring the ancestral driver)."""
+        """Build the PTSampler, sample, and write run_summary.json.
+
+        Returns the summary dict, or None if sample() raised ValueError.
+        """
         try:
             from impulse import PTSampler
         except ImportError as err:

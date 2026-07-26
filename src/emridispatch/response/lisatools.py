@@ -1,7 +1,7 @@
 """EMRI injection + matched-filter likelihood via lisa-analysis-tools + FEW.
 
-Optional dependency: `pip install emridispatch[lisatools]`. All lisatools imports
-happen at construction time, so this module imports clean without it.
+Optional extra `emridispatch[lisatools]`; imports are deferred to
+construction, so this module always imports cleanly without it.
 """
 
 import logging
@@ -368,13 +368,10 @@ class EMRIInjectionGenerator:
             self._add_noise_realization()
 
     def _add_noise_realization(self):
-        """Add a Gaussian noise realization drawn from the sensitivity PSD to the
-        frequency-domain data.
+        """Add a Gaussian noise realization drawn from the sensitivity PSD.
 
-        Convention (validated against lisatools.inner_product): per good frequency
-        bin, n_tilde = sqrt(S(f) * T / 4) * (x + i y) with x, y ~ N(0,1), giving
-        E[<n|n>] = 2 per bin per channel (chi^2 dof). Bins where the PSD is
-        non-finite or non-positive (DC) get no noise.
+        Per good bin: n_tilde = sqrt(S(f)*T/4)*(x+iy), x,y~N(0,1), giving
+        E[<n|n>]=2 per bin per channel. Non-finite/<=0 PSD bins get none.
         """
         fd = self.data_residual_array.data_res_arr  # FDSignal
         xp = fd.xp
@@ -410,8 +407,8 @@ class EMRIInjectionGenerator:
     def generate_time_domain(self, params):
         """(times, strain) for a physical-parameter dict, on the host.
 
-        strain has shape (nchannels, N) at the generator's native length, before
-        the FFT padding applied by _pad_to_fft_length.
+        strain has shape (nchannels, N) at native length, before FFT
+        padding.
         """
         channels = self.waveform_generator(*self._get_params(params))
         strain = np.asarray([
@@ -422,11 +419,9 @@ class EMRIInjectionGenerator:
     def evaluate_likelihood(self, input, full=None):
         """Log-likelihood for a template.
 
-        By default (full=None -> self.full_likelihood, i.e. False) returns only the
-        template-varying part <d|h> - 1/2<h|h>, dropping the constant noise and
-        <d|d> terms. 
-        Pass full=True (or construct with full_likelihood=True) to get the absolute,
-        correctly-normalised ln L = noise + (-1/2)(<d|d> + <h|h> - 2<d|h>).
+        Default (full=None -> self.full_likelihood) returns only
+        <d|h> - 0.5<h|h>. full=True returns the absolute
+        ln L = noise + (-0.5)(<d|d> + <h|h> - 2<d|h>).
         """
         if full is None:
             full = self.full_likelihood

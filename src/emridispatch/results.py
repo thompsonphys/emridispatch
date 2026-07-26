@@ -1,38 +1,20 @@
 """Sampler-agnostic results: raw backend output -> common HDF5 format.
 
-A PE run's outdir is backend-specific (impulse: one ASCII chain_N.txt per
-temperature rung; eryn: an eryn_chain.h5 HDF file; plus shared json/npz
-sidecars). This module converts that raw output into a single self-contained
-`results.h5` that downstream tools (emridispatch-plot, notebooks) can use
-without knowing anything about the sampler:
+Converts a backend outdir (impulse chain_N.txt; eryn eryn_chain.h5)
+into one format_version 1 results.h5. Requires h5py
+(pip install emridispatch[results]).
 
-    emridispatch-postprocess OUTDIR              # -> OUTDIR/results.h5
-
-New sampler backends plug in via register_converter(), the same registry
-pattern as backends/response/fisher. Requires h5py:
-
-    pip install emridispatch[results]
-
-HDF5 schema (format_version 1)
-------------------------------
-root attrs: format_version, backend, ndim, ntemps, nsteps,
-            param_names (json), config (json)
-/chains/samples    (ntemps, nsteps, ndim)   raw sampling coordinates
-/chains/lnlike     (ntemps, nsteps)
-/chains/lnprob     (ntemps, nsteps)
-/chains/accepted   (ntemps, nsteps)
-/temperatures      (ntemps,)                inf allowed (top rung)
-/physical/samples  (ntemps, nsteps, ndim)   whitening inverted (when available)
-/truth             sampling_vector, physical_vector datasets; injection json attr
-/meta              config_yaml, run_log, run_summary string datasets: verbatim
-                   copies of the outdir's config.yaml / run.log /
-                   run_summary.json (the log records emridispatch, sampler-backend
-                   and TDI package versions at run start)
-/prior             spec json attr (when the run wrote prior_spec.json) plus the
-                   prior_bounds.npz arrays/scalars for older runs
-
-The prior spec reconstructs the exact JointPrior via Results.prior() for prior
-draws / reweighting in postprocessing; the arrays are the box-level fallback.
+Schema; root attrs format_version, backend, ndim, ntemps, nsteps,
+param_names (json), config (json):
+    /chains/samples    (ntemps, nsteps, ndim)  raw sampling coords
+    /chains/lnlike     (ntemps, nsteps)
+    /chains/lnprob     (ntemps, nsteps)
+    /chains/accepted   (ntemps, nsteps)
+    /temperatures      (ntemps,)               inf allowed (top rung)
+    /physical/samples  (ntemps, nsteps, ndim)  whitening inverted
+    /truth             sampling_vector, physical_vector; injection json attr
+    /meta              config_yaml, run_log, run_summary verbatim
+    /prior             spec json attr plus prior_bounds.npz arrays
 """
 
 from __future__ import annotations
@@ -265,17 +247,13 @@ def detect_backend(run_dir):
 
 
 def is_complete(run_dir):
-    """True iff the run dir holds a finished run. run_summary.json is the one
-    file every backend writes, and writes only on sampler success, so it is
-    the backend-agnostic completion marker (drivers recreate the outdir before
-    each run, so a summary can never coexist with stale chain output)."""
+    """True iff the run dir holds a finished run."""
     return os.path.exists(os.path.join(run_dir, "run_summary.json"))
 
 
 def load_or_convert(run_dir, backend=None):
-    """Results for a run dir: the saved results.h5 when present (downstream
-    tools prefer the common format over raw backend output), else an in-memory
-    convert() of the raw files."""
+    """Results for a run dir: the saved results.h5 if present, else an
+    in-memory convert() of the raw files."""
     path = os.path.join(run_dir, DEFAULT_NAME)
     if os.path.exists(path):
         return Results.load(path)
@@ -299,9 +277,7 @@ def convert(run_dir, backend=None):
 
 
 def _attach_run_files(results, run_dir):
-    """Embed verbatim config.yaml + run.log from the outdir (reproducibility:
-    the log records emridispatch/backend/TDI package versions at run start).
-    Backend-agnostic, so applied after every converter."""
+    """Embed verbatim config.yaml and run.log from the outdir."""
     cfg_path = os.path.join(run_dir, "config.yaml")
     if results.config_yaml is None and os.path.exists(cfg_path):
         with open(cfg_path) as fh:
@@ -337,11 +313,9 @@ def _load_json(path):
 def _load_sidecars(run_dir, samples):
     """Backend-agnostic sidecar files -> shared Results kwargs.
 
-    The pipeline writes these identically for every backend: the reparam
-    transform (inverts whitening into physical coords), injection_truth.json,
-    prior_spec.json / prior_bounds.npz, and run_summary.json (with the
-    config.yaml fallback for killed runs). `samples` is any (..., NDIM) array
-    in raw sampling coordinates.
+    Reads reparam_transform.npz, injection_truth.json, prior_spec.json /
+    prior_bounds.npz, and run_summary.json (config.yaml fallback).
+    `samples` must be an (..., NDIM) array in raw sampling coordinates.
     """
     # Invert the whitening to physical sampling-vector coordinates.
     reparam = None
@@ -448,20 +422,11 @@ def _convert_impulse(run_dir):
 
 @register_converter("eryn")
 def _convert_eryn(run_dir):
-    """eryn EnsembleSampler raw output: eryn_chain.h5, HDF group "mcmc" with
-    chain/model_0 (nsteps, ntemps, nwalkers, 1, ndim), log_like/log_prior
-    (nsteps, ntemps, nwalkers), betas (nsteps, ntemps) and cumulative
-    accepted counts (ntemps, nwalkers). Read with h5py directly (no eryn
-    import) so postprocessing stays sampler-agnostic.
+    """eryn EnsembleSampler raw output (eryn_chain.h5, group "mcmc").
 
-    Walkers are flattened STEP-MAJOR into the common (ntemps,
-    nsteps*nwalkers, ndim) schema -- all walkers of step 0, then step 1, ...
-    -- so burn=k*nwalkers removes the first k time steps and time ordering
-    survives for trace plots. Per-step acceptance booleans are not stored by
-    eryn; each walker's cumulative acceptance FRACTION is broadcast across
-    its steps instead (keeps the schema shape and accepted.mean() equal to
-    the true rate). Temperatures come from the last betas row (the ladder
-    adapts), with beta=0 -> inf.
+    Flattened STEP-MAJOR into (ntemps, nsteps*nwalkers, ndim): step 0's
+    walkers first, then step 1's, etc. `accepted` is each walker's
+    cumulative acceptance fraction, broadcast per step (not a boolean).
     """
     h5py = _require_h5py()
     path = os.path.join(run_dir, "eryn_chain.h5")

@@ -1,19 +1,8 @@
 """Posterior visualization from the common results.h5 format.
 
-Sampler-agnostic by construction: this module only reads results files written
-by emridispatch-postprocess (see emridispatch.results), never raw backend output.
-
-    emridispatch-plot OUTDIR                # corner + 1D marginals of the posterior
-    emridispatch-plot OUTDIR --all-temps    # marginals overlaid across the ladder
-    emridispatch-plot results.h5 --temps 0 3 5 --burn 50
-
-Default coordinates are physical (whitening inverted); --sampling plots the raw
-sampling coordinates instead -- note that for whitened runs the intrinsic block
-is then in rotated/scaled coordinates, only labeled by its physical names.
-
-Requires matplotlib + corner:
-
-    pip install emridispatch[viz]
+Reads only results.h5 (never raw backend output); sampler-agnostic.
+Default coords are physical; --sampling shows raw sampling coords, which
+for whitened runs are rotated/scaled though still labeled by physical names.
 """
 
 from __future__ import annotations
@@ -115,8 +104,10 @@ def plot_marginals(rung_data, labels, truth=None, out_path="marginals.png"):
 
 def make_plots(results, temps=(0,), all_temps=False, burn=0, physical=True,
                thin=1, outdir="."):
-    """Produce corner.png (coldest requested rung) + marginals.png (all
-    requested rungs overlaid). Returns the written paths."""
+    """Produce corner.png (coldest requested rung) + marginals.png (all rungs).
+
+    Returns the written paths.
+    """
     if all_temps:
         rungs = list(range(results.ntemps))
     else:

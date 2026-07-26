@@ -1,15 +1,16 @@
 """CLI entry point: `emridispatch <config.yaml> [--no-resume] [--log-level ...]`.
-
 """
 
 import os
 
 
 def set_env_guards():
-    """Keep per-eval BLAS/OMP single-threaded (must run before numpy import to
-    take effect), and neutralize lisatools' bare breakpoint() in
-    EMRITDIWaveform's except block so a waveform failure can't drop a
-    non-interactive run into pdb."""
+    """Force single-threaded BLAS/OMP env vars and disable breakpoint().
+
+    Must run before numpy import to take effect. Neutralizes lisatools'
+    bare breakpoint() in EMRITDIWaveform's except block so a waveform
+    failure can't drop a non-interactive run into pdb.
+    """
     for _v in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
                "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
         os.environ.setdefault(_v, "1")

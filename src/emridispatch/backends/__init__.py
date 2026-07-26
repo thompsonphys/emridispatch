@@ -1,10 +1,8 @@
-"""Sampler-backend registry. Each backend is an optional extra; imports are
-lazy so the core package never requires a sampler.
+"""Sampler-backend registry; imports are lazy so the core package never
+requires a sampler.
 
-Future backends (nessai, bilby) register here: a backend is a class with
-`name` and `run(problem, cfg, resume=True) -> dict` consuming a
-SamplingProblem (see emridispatch.backends.base). External packages can register
-via register_backend("mysampler", "mypkg.backend:MyBackend").
+A backend is a class with `name` and `run(problem, cfg, resume=True)
+-> dict`; register externally via register_backend("name", "mod:Cls").
 """
 
 import importlib

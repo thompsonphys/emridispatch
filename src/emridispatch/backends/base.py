@@ -1,19 +1,7 @@
 """Sampler-agnostic problem description + backend protocol.
 
-SamplingProblem is the seam between the physics (likelihood, prior, reparam,
-start point) and any concrete sampler. It stores the RAW physical-space
-likelihood and the structured JointPrior; reparam wrapping is something a
-backend opts into via wrapped() -- MCMC backends (impulse) sample in the
-whitened u-space, while future nested-sampler backends (nessai, bilby) can
-consume the structured prior and physical-space likelihood directly:
-
-* nessai: problem.param_names / problem.prior.mins/maxes -> Model names/bounds,
-  problem.prior -> log_prior, problem.lnlike -> log_likelihood.
-* bilby: each problem.prior[i] (Uniform/LogUniform/Gaussian/Sine/Cosine) has a
-  direct bilby prior equivalent for a PriorDict.
-
-Everything impulse-specific (temperature ladder, custom jump API, adaptation
-knobs) lives in emridispatch.backends.impulse, read from the config by the backend.
+Stores the RAW physical-space likelihood/prior; reparam wrapping (for
+whitened-space MCMC backends) happens only via wrapped(), not here.
 """
 
 from dataclasses import dataclass, field
@@ -52,10 +40,9 @@ class SamplingProblem:
         """Sampling-space view for MCMC backends: reparam-wrapped callables plus
         the transformed start / proposal covariance / truth.
 
-        The prior wrapper carries jacobian=True -- the change-of-variables term
-        a NONLINEAR map (grid mode) needs (a no-op 0.0 for the linear "auto").
-        periodic passes through unchanged: the reparam acts only on the
-        intrinsic block, which is disjoint from the periodic angle indices.
+        jacobian=True adds the grid-mode change-of-variables term (no-op
+        for linear "auto"); periodic is untouched since it's disjoint
+        from the reparam's intrinsic-parameter block.
         """
         if self.whitened:
             lnlike = ReparamCallable(self.lnlike, self.reparam)

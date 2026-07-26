@@ -1,8 +1,7 @@
 """Load a YAML config into attribute-accessible sections.
 
-Everything is configured through the YAML file (no environment variables). The
-config path is a required CLI argument (`emridispatch <config.yaml>`); there is no
-repo-root default.
+No environment variables; the config path is a required CLI argument
+(`emridispatch <config.yaml>`), with no repo-root default.
 """
 
 from types import SimpleNamespace
@@ -111,11 +110,12 @@ def _check_keys(section, raw, allowed):
 
 
 def load_config(path):
-    """Return a SimpleNamespace: .injection (dict) plus .data/.sampler/.prior/
-    .priors/.reparam/.run/.logging/.pp sections. Backend-specific sampler knobs
-    live in nested subsections: .sampler.impulse (with .ladder/.mode_jump) and
-    .sampler.eryn. Defaults for every optional key are merged here, so
-    consumers read attributes directly."""
+    """Return a SimpleNamespace of config sections parsed from YAML.
+
+    Sections: injection (dict) plus .data/.sampler/.prior/.priors/
+    .reparam/.run/.logging/.pp. Sampler knobs nest under .sampler.impulse
+    (.ladder/.mode_jump) and .sampler.eryn, each with merged-in defaults.
+    """
     with open(path) as fh:
         raw = yaml.safe_load(fh)
 

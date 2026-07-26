@@ -1,38 +1,8 @@
 """Launch N independent EMRI PT-MCMC cold chains for a cross-chain R-hat.
 
-Only the cold rung of a PT run is a posterior sample, so independent cold chains
-come from separate runs with different seeds and dispersed starts
-(sampler.start_mode). This driver builds a per-seed config (overriding run.seed /
-run.outdir and sampler.start_mode / start_jitter / nsamples) and runs the
-sampler for each, then hands
-the finished dirs to emridispatch.diagnostics for the R-hat / ESS report.
-Works with any sampler backend (impulse, eryn): completion is detected via the
-backend-agnostic run_summary.json and each finished seed dir gets the common
-results.h5 (written if missing) that diagnostics read.
-
-By default each chain runs in process via emridispatch.pipeline.run_from_config (no
-subprocess, no YAML files) with a GPU-memory cleanup between chains. Pass --isolate
-to run each chain in a fresh subprocess (`python -m emridispatch.cli`) instead. Slower
-to spawn but bulletproof GPU teardown, for long production sweeps on a tight card.
-
-Dispersed starts make R-hat meaningful:
-    prior  - full 12-D start from the prior box (blind-PE dispersion)
-    fisher - truth + jitter*Fisher-sigma (mild; angles barely cross modes)
-    truth  - every chain at the injection (R-hat then optimistic)
-
-Fisher sharing: the first seed computes the Fisher box and caches
-prior_bounds.npz; every later seed copies that cache in and skips the Fisher (the
-cache is injection-identical across seeds; dispersed starts are drawn after it).
-
-Each likelihood call is a full EMRI+TDI waveform -> run on a GPU node. Chains are
-sequential (one GPU); parallelise across nodes with --isolate + per-seed configs.
-
-Usage:
-    emridispatch-multichain my_config.yaml --nchains 4 --start-mode fisher
-    emridispatch-multichain my_config.yaml --seeds 1 2 3 4 --start-mode prior
-    emridispatch-multichain my_config.yaml --nchains 4 --isolate   # subprocess per chain
-    emridispatch-multichain my_config.yaml --nchains 4 --resume    # skip finished seeds
-    emridispatch-multichain my_config.yaml --nchains 4 --analyze-only  # just re-report
+start_mode sets start dispersion: prior=blind, fisher=truth+jitter*sigma,
+truth=all at injection (R-hat then optimistic). First seed builds and
+caches the Fisher prior box; later seeds reuse it, skipping their own.
 """
 
 from emridispatch.cli import set_env_guards
@@ -61,8 +31,7 @@ def outdir_for(mc_root, seed):
 
 
 def _ensure_results(outdir):
-    """Write the common results.h5 into a finished seed dir if missing, so
-    diagnostics and downstream tools read it instead of raw backend output."""
+    """Write results.h5 into a finished seed dir if missing."""
     path = os.path.join(outdir, DEFAULT_NAME)
     if os.path.exists(path):
         return

@@ -1,0 +1,64 @@
+# Minimal eryn-backend configuration (`pip install emridispatch[eryn]`).
+# The eryn knobs live in the sampler.eryn subsection (the impulse subsection is
+# simply omitted). Raw output is <outdir>/eryn_chain.h5 (resume appends);
+# postprocess with `emridispatch-postprocess <outdir>`.
+#     emridisp eryn_config.yaml
+
+injection:
+  mass_1: 1.0e+6   # note the +: YAML needs a signed exponent to parse as float
+  mass_2: 10.0
+  a: 0.5
+  p: 8.0
+  e: 0.3
+  x: 1.0           
+  q_k: 1.0
+  phi_k: 1.5707963267948966
+  q_s: 1.0
+  phi_s: 1.5707963267948966
+  luminosity_distance: 1.0
+  phi_phi: 1.5707963267948966
+  phi_theta: 0.0              
+  phi_r: 1.5707963267948966
+
+data:
+  response: lisatools  
+  duration: 1.0    
+  delta_t: 10.0    
+  inj_snr: 40.0    
+  channels: [A, E]  
+  tdi: 2nd  
+  add_noise: true 
+  noise_seed: 6890       
+
+sampler:
+  backend: eryn
+  nsamples: 100       
+  eryn:
+    nwalkers: 24        
+    ntemps: 1          
+    Tmax: null          
+    adaptive_temps: false
+    stop_adaptation: -1 
+    burn: 0           
+    thin_by: 1
+    progress: false
+    start_spread: 1.0
+
+prior:
+  fisher: manual
+  box_scale: 25.0
+  sigmas:
+    mass_1: 1.0
+    mass_2: 1.0e-4
+    a: 1.0e-5
+    p: 1.0e-6
+    e: 1.0e-6
+    luminosity_distance: 0.05
+
+reparam:
+  mode: auto       
+  idx: [0, 1, 2, 3, 4, 5] 
+
+run:
+  seed: 1245
+  outdir: ./output_chains_eryn

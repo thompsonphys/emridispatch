@@ -1,9 +1,8 @@
 """Logging setup for the emridispatch pipeline.
 
-Stdlib logging only. setup_logging() is called from the CLI entry points (never
-at import time) and configures the "emridispatch" package logger with a console
-handler plus an optional per-run file handler in the output directory. Library
-modules just do `logger = logging.getLogger(__name__)`.
+setup_logging() must be called explicitly (never at import time) to
+configure the "emridispatch" logger with a console + optional per-run
+file handler; library modules just use logging.getLogger(__name__).
 """
 
 import logging
@@ -17,18 +16,8 @@ _DATEFMT = "%Y-%m-%d %H:%M:%S"
 def setup_logging(outdir=None, level="INFO", filename="run.log"):
     """Configure the emridispatch package logger.
 
-    Parameters
-    ----------
-    outdir : str or None
-        Run output directory. When given (and filename is not None), a file
-        handler writes to <outdir>/<filename> (directory created if needed).
-    level : str or int
-        Log level for the package logger ("DEBUG", "INFO", ...).
-    filename : str or None
-        Log file name relative to outdir; None disables the file handler.
-
-    Idempotent: repeat calls replace the previous handlers rather than
-    stacking duplicates (multichain / P-P drivers call once per run dir).
+    Idempotent: replaces prior handlers rather than stacking. Adds a file
+    handler at <outdir>/<filename> only if both are given (dir auto-created).
     """
     logger = logging.getLogger(PACKAGE_LOGGER)
     if isinstance(level, str):

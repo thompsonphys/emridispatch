@@ -1,15 +1,6 @@
 """Interactive exploration of an emridispatch injection: SNR, likelihood, priors.
 
-Loads a config, builds the injection and likelihood a PE run would use, and
-evaluates parameter sets against it. Read-only: nothing here writes to the run
-directory, and no Fisher is computed unless explicitly allowed.
-
-    from emridispatch.workbench import load, measure, truth, offset
-
-    cfg, model = load("my_config.yaml")
-    measure(model, truth(model))
-    measure(model, offset(model, p=+0.05))
-
+Read-only: no writes to the run directory, no Fisher unless allowed.
 Plots live in emridispatch.workbench_plots (needs the `viz` extra).
 """
 
@@ -62,9 +53,8 @@ def to_vector(params):
 def to_physical(model, vector):
     """Physical-parameter dict for a 12-D sampling vector.
 
-    The two unsampled entries (x, phi_theta) are taken from the model's
-    injection: the FastKerrEccentricEquatorial waveform is equatorial, so
-    neither is a sampled degree of freedom.
+    x and phi_theta are copied from model.injection_parameters: the
+    equatorial waveform never samples them.
     """
     vec = to_vector(vector)
     out = {name: float(model.injection_parameters[name]) for name in _UNSAMPLED}
@@ -94,10 +84,8 @@ def offset(model, **deltas):
 def load(config_path):
     """(cfg, model) for a config file: no outdir, no logging, no writes.
 
-    set_env_guards() is called for PYTHONBREAKPOINT, but the BLAS/OMP thread
-    variables it sets only bite if they precede the first numpy import -- in a
-    notebook they are already too late. Scripts should call set_env_guards()
-    before importing numpy, as examples/explore_injection.py does.
+    set_env_guards() runs, but its BLAS/OMP thread vars only take effect
+    before numpy's first import; call it yourself first in scripts.
     """
     from emridispatch.cli import set_env_guards
     from emridispatch.config import load_config
@@ -132,12 +120,7 @@ def _host(value):
 
 
 def _arr(container):
-    """Host-side channel array for a data/template container.
-
-    The lisatools DataResidualArray wraps its array one level down at
-    .data_res_arr.arr and defines no attribute delegation, so reading .arr
-    directly works only on the inner domain object.
-    """
+    """Host-side channel array for a data/template container."""
     inner = getattr(container, "data_res_arr", container)
     return np.asarray(_host(inner.arr))
 
@@ -145,10 +128,7 @@ def _arr(container):
 def _f_arr(container):
     """Host-side frequency grid for a data/template container.
 
-    Read from the inner object like the array is. The wrapper defines an f_arr
-    property over a private attribute that nothing ever assigns -- the only
-    method that would set it is never called from __init__ -- so the wrapper's
-    own f_arr raises on every instance, whatever the construction path.
+    The wrapper's own f_arr always raises; read from the inner object.
     """
     inner = getattr(container, "data_res_arr", container)
     return np.asarray(_host(inner.f_arr))
@@ -295,10 +275,9 @@ _INJECTION_CACHE_ATTR = "_workbench_injection_template"
 def injection_template(model):
     """The noiseless injected signal, regenerated once and cached on the model.
 
-    model.data_residual_array carries the noise realization when
-    data.add_noise is true, and no noiseless copy is retained, so this
-    regenerates from the (distance-calibrated) injection parameters.
-    Cached for the model's lifetime; reassigning model.injection_parameters does not invalidate it.
+    Regenerated from injection_parameters since data_residual_array only
+    holds the noisy version. Cached per model instance; reassigning
+    injection_parameters afterward does not invalidate the cache.
     """
     _require(model, "generate_signal", "injection_template")
     cached = getattr(model, _INJECTION_CACHE_ATTR, None)
@@ -322,14 +301,9 @@ def noise(model):
 def prior_from_config(cfg, model=None, allow_fisher=False):
     """The run's JointPrior, from the outdir cache when present.
 
-    Resolution order: <outdir>/prior_spec.json, then <outdir>/prior_bounds.npz,
-    then a fresh build from the config. Never writes the cache.
-
-    The fresh-build path needs injection_parameters, not a model: if model is
-    given it is reused; otherwise, when the config does not calibrate the
-    injected distance (data.inj_snr is None), cfg.injection is already exact
-    and no model is built; only when calibration is needed and none was
-    supplied is a model built to get the calibrated distance.
+    Resolution order: prior_spec.json, then prior_bounds.npz, then a
+    fresh build (never writes the cache). Fresh build only needs a model
+    when data.inj_snr calibrates the injected distance and none was passed.
     """
     import json
     import os

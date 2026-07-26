@@ -1,20 +1,7 @@
 """Backend-agnostic EMRI PE pipeline: config -> SamplingProblem -> backend.
 
-Samples the 12-D vector
-    [ln m1, ln m2, a, p, e, dist, q_s, phi_s, q_k, phi_k, phi_phi, phi_r]
-against a matched-filter likelihood built from one EMRI injection. The first
-six are intrinsic/distance (Fisher-sized boxes); the last six are sky/spin
-angles + initial phases (full physical ranges by default, overridable per
-parameter via the config `priors:` section).
-
-Public API:
-    build_problem(cfg, resume=True)   -> SamplingProblem (no sampler imports)
-    run_from_config(cfg, resume=True) -> builds the problem, dispatches to the
-                                         configured sampler backend, returns
-                                         its summary dict
-
-resume=True restarts from the OUTDIR checkpoint/cache; delete OUTDIR to start
-fresh.
+12-D sampled vector: [ln m1, ln m2, a, p, e, dist, q_s, phi_s, q_k, phi_k,
+phi_phi, phi_r]. resume=True restarts from the OUTDIR checkpoint/cache.
 """
 
 import json
@@ -56,9 +43,9 @@ _FISHER_DISTS = {
 def _dist_version(name):
     """Version for a distribution OR import name.
 
-    metadata.version() only knows distribution names; when they differ from the
-    import name (module `impulse` ships in distribution `impulse-mcmc`), map
-    the import name through packages_distributions().
+    Falls back to packages_distributions() when metadata.version() doesn't
+    recognize name as a distribution (e.g. import `impulse` -> dist
+    `impulse-mcmc`).
     """
     from importlib import metadata
 
@@ -103,11 +90,8 @@ def _coerce(o):
 def _write_injection_truth(outdir, inj_params, truth_vec):
     """Persist the injected truth for downstream plotting.
 
-    Writes both the 12-D sampling-coordinate vector (masses log, distance after
-    SNR calibration) and the full physical injection dict, 
-    so notebooks get exact truth lines without
-    rebuilding the (GPU) likelihood or guessing the rescaled distance from the
-    prior box.
+    Writes injection_truth.json: the 12-D sampling vector (masses in log,
+    distance after SNR calibration) plus the full physical injection dict.
     """
     os.makedirs(outdir, exist_ok=True)
     truth = {
@@ -132,10 +116,8 @@ def fisher_key_from_config(cfg):
 def build_problem(cfg, resume=True):
     """Construct a backend-agnostic SamplingProblem from a loaded config.
 
-    Builds the injection model (generates the injection, calibrates SNR), the
-    prior (Fisher box + per-parameter overrides) + correlated proposal + reparam
-    (from the outdir cache when present, else via the configured Fisher provider,
-    then cached), and the dispersed cold-chain start. No sampler is imported.
+    Loads prior bounds from the outdir cache when present, else computes
+    via the configured Fisher provider and caches them. No sampler import.
     """
     ndim = NDIM
     outdir = cfg.run.outdir

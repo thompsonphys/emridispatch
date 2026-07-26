@@ -1,28 +1,8 @@
 """Per-parameter prior distributions and their 12-D joint composition.
 
-Lightweight, numpy/scipy-only (no bilby dependency). Each 1-D Prior carries its
-bounds, an optional periodicity, a normalized log_prob, and a sampler. The
-JointPrior composes them into the callable the sampling backends consume, and
-preserves the semantics of the old uniform-box prior exactly:
-
-* parameters declared periodic are wrapped back into [min, max] modulo their
-  period before the bounds check (so a wrapped proposal is not spuriously
-  rejected);
-* non-finite parameters (e.g. a nonlinear reparam mapping an out-of-domain
-  proposal to NaN) are out of bounds -- NaN comparisons are False, so without an
-  explicit check a NaN point would silently pass the box test.
-
-log_prob is properly normalized per distribution, 
-so non-uniform priors mix correctly. For an
-all-uniform box this only shifts ln-prior by a constant, which cancels in MCMC
-acceptance ratios.
-
-YAML override syntax (config `priors:` section, keyed by sampling-vector name):
-
-    priors:
-      dist:  {type: loguniform, min: 0.5, max: 20.0}
-      q_s:   {type: sine}
-      ln_m1: {type: gaussian, mu: 13.8, sigma: 0.001}
+Periodic params wrap into [min, max] before the bounds check; NaN counts
+as out of bounds. log_prob is normalized per distribution so mixed prior
+types combine correctly; override via a config `priors:` mapping.
 """
 
 from __future__ import annotations
@@ -222,10 +202,9 @@ class Cosine(Prior):
 class CallablePrior(Prior):
     """User-supplied log-prob with explicit bounds.
 
-    log_prob_fn(x) must be vectorized (or at least accept scalars) and need not
-    handle out-of-bounds input -- the wrapper masks it to -inf. sample_fn(rng,
-    size) is optional; without it, sample() falls back to a uniform draw over
-    the bounds (fine for start points; the target density is still exact).
+    log_prob_fn(x) is masked to -inf outside bounds; need not handle
+    out-of-bounds itself. sample_fn(rng, size) is optional, else sample()
+    draws uniform over the bounds.
     """
 
     def __init__(self, log_prob_fn, minimum, maximum, period=None, sample_fn=None):
@@ -245,8 +224,7 @@ class CallablePrior(Prior):
         return rng.uniform(self.minimum, self.maximum, size)
 
     def to_spec(self):
-        """Bounds-only record: the callable itself is not serializable, so this
-        spec documents the prior but cannot reconstruct it."""
+        """Bounds-only spec; the callable itself is not serializable."""
         spec = {"type": "callable"}
         if np.isfinite(self.minimum):
             spec["min"] = self.minimum
@@ -280,9 +258,8 @@ _SPEC_NAMES = {
 
 
 def prior_from_spec(spec, default_min=None, default_max=None):
-    """Build a Prior from a config dict like {type: sine} or
-    {type: gaussian, mu: 1.0, sigma: 0.1}. min/max fall back to the defaults
-    (typically the Fisher-box bounds for that parameter)."""
+    """Build a Prior from a config dict (e.g. {type: sine}); min/max
+    fall back to the given defaults when the spec omits them."""
     spec = dict(spec)
     kind = str(spec.pop("type", "uniform")).lower()
     if kind not in _SPEC_TYPES:
@@ -321,11 +298,9 @@ def prior_from_spec(spec, default_min=None, default_max=None):
 class JointPrior:
     """Joint prior over the sampling vector: a list of independent 1-D Priors.
 
-    The callable handed to sampling backends: returns the summed log-prob
-    (-inf out of bounds), with periodic wrap-before-bounds-check and an
-    explicit non-finite guard (see module docstring). Also exposes the box
-    structure (mins/maxes/periodic) and per-parameter objects, which future
-    nested-sampler backends (bilby PriorDict, nessai Model) map from directly.
+    Callable returns summed log-prob (-inf out of bounds; periodic params
+    are wrapped into range first). Exposes mins/maxes/periodic and the
+    per-parameter priors for external samplers.
     """
 
     def __init__(self, priors, names=None, rng=None):
@@ -408,7 +383,7 @@ class JointPrior:
         return out[0] if size is None else out
 
     def initial_sample(self):
-        """Duck-type contract kept from the old box prior (used by wrappers)."""
+        """Alias for sample(); duck-typed callers expect this name."""
         return self.sample()
 
     def __repr__(self):
@@ -418,9 +393,8 @@ class JointPrior:
 
 def joint_prior_from_box(mins, maxes, periodic_indices=(), names=None,
                          overrides=None):
-    """Default JointPrior for a prior box: Uniform per row, PeriodicUniform for
-    the indices in periodic_indices, then per-name overrides from a config
-    `priors:` mapping (see prior_from_spec)."""
+    """Default JointPrior for a box: Uniform per row, PeriodicUniform for
+    periodic_indices, then overrides from a config `priors:` mapping."""
     mins = np.asarray(mins, dtype=float)
     maxes = np.asarray(maxes, dtype=float)
     names = list(names) if names is not None else list(PARAM_NAMES[: len(mins)])

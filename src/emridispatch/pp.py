@@ -1,35 +1,8 @@
 """P-P (probability-probability) posterior-calibration test for the EMRI sampler.
 
-N full PE runs, each on a different injection whose truth is drawn uniformly
-from one fixed fiducial prior box; for a calibrated pipeline the rank of the
-truth within each 1-D marginal posterior is Uniform(0,1) across runs.
-
-Design (deliberate, for exact P-P validity):
-  * The prior box is built once, at the fiducial injection (the config's
-    injection: block), scaled by prior.box_scale and not re-centred on each run's
-    truth. Truths are then genuine draws from the sampling prior, and the reparam
-    whitening is anchored at the fiducial, so no truth information leaks into any
-    run. Every run gets the reference cache copied in, which routes the sampler
-    down its resume path (Fisher skipped, truth-centred box build bypassed).
-  * SNR calibration is off for P-P runs (inj_snr -> null): rescaling distance
-    to a fixed SNR would overwrite the drawn distance truth. Realized optimal
-    SNR varies run to run and is recorded in each run_summary.json.
-  * Noise on: each run gets its own PSD noise realization (noise_seed = base+i).
-  * Chains start blind (start_mode 'prior').
-
-Ranks are computed in physical coordinates (the auto-reparam whitening mixes
-dimensions; per-parameter ranks in u-space would be meaningless).
-
-Caveat: P-P assumes every posterior is sampled to convergence. With blind starts
-and off-centre truths, sampler failures show up as rank pile-up at 0/1.
-
-Each likelihood call is a full EMRI+TDI waveform -> production sweeps want a GPU
-node. Runs are sequential; --isolate gives per-run subprocess GPU teardown.
-
-Usage:
-    emridispatch-pp my_config.yaml --nruns 20
-    emridispatch-pp my_config.yaml --resume        # skip finished inj dirs
-    emridispatch-pp my_config.yaml --analyze-only  # just re-tabulate + re-plot
+Truths are drawn from one fixed fiducial prior box (not per-run recentred);
+SNR calibration is off so distance truths aren't overwritten; ranks are
+computed in physical coordinates (the reparam whitening mixes u-space dims).
 """
 
 from emridispatch.cli import set_env_guards
@@ -80,10 +53,9 @@ def _valid_truth(vec):
 def draw_truth(mins, maxes, rng, fiducial_inj, max_tries=1000):
     """One injection dict, truth drawn uniformly from the fiducial prior box.
 
-    Masses are drawn in ln-space (the box's native rows 0/1) and exponentiated;
-    x / phi_theta stay at the fiducial (not sampled -- equatorial model). Draws
-    violating waveform validity are rejected and redrawn (this tilts the effective
-    prior only where the likelihood would be -inf anyway).
+    Masses are drawn in ln-space then exponentiated; x/phi_theta stay fixed
+    at the fiducial (not sampled). Invalid draws (outside waveform validity)
+    are rejected and redrawn.
     """
     for _ in range(max_tries):
         vec = rng.uniform(mins, maxes)
@@ -104,9 +76,10 @@ def draw_truth(mins, maxes, rng, fiducial_inj, max_tries=1000):
 
 
 def ensure_reference_cache(cfg, outroot):
-    """Build the fiducial prior box once (Fisher at the config injection,
-    SNR-calibrated so the box-centre distance is sane) and cache it under
-    <outroot>/reference/. All P-P runs share this cache."""
+    """Build the fiducial prior box once, caching it for all P-P runs.
+
+    No-op if <outroot>/reference/prior_bounds.npz already exists.
+    """
     ref_dir = os.path.join(outroot, "reference")
     ref_cache = cache_path(ref_dir)
     if os.path.exists(ref_cache):
@@ -158,8 +131,11 @@ def _gpu_cleanup():
 
 
 def _run_config(cfg_base, inj, i, outdir, nsamples):
-    """Deep-copied config for P-P run i: drawn injection, blind start, free
-    distance (no SNR calibration), per-run noise realization."""
+    """Deep-copied config for P-P run i.
+
+    Sets drawn injection, blind start, free distance (no SNR calibration),
+    and per-run noise realization.
+    """
     cfg = copy.deepcopy(cfg_base)
     cfg.injection = inj
     cfg.run.outdir = outdir

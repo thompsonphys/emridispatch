@@ -1,37 +1,10 @@
 """Adaptive, mode-agnostic jump proposals for impulse PT-MCMC.
 
-The EMRI posterior (in the whitened u-coordinates the sampler runs in) splits
-into several modes separated by likelihood barriers. Hot PT chains cross the
-barriers; the cold chain's local proposals cannot, so it gets stuck in one mode
-and its per-mode weights are wrong. These proposals let ANY chain hop between
-modes without hard-coding where the modes are or assuming they share a shape.
-
-The enabling trick: impulse registers a single proposal *instance* on every
-temperature chain (ProposalBundle.add_jump adds the same callable to each
-chain's JumpProposals), and calls it as ``proposal(chain_stats) -> (q, qxy)``
-where ``chain_stats.current_sample`` is that chain's position. So a *stateful*
-proposal sees positions from all temperatures over time. We keep a shared
-``CrossChainPool`` fed on every call: the hot chains (which visit every mode)
-populate it, and the cold chain draws on it to jump. This fixes the root cause
-(a stuck chain's own buffer only contains one mode).
-
-Two methods, selectable and stackable:
-
-* ``PopulationDEJump`` (Method 1) -- differential evolution over the shared
-  pool: ``q = x + gamma * (Xa - Xb)``. The difference vectors ARE the inter-mode
-  offsets, in the right directions and scales, for any geometry / number of
-  modes. Symmetric, so ``qxy = 0``. No fitting, no per-mode assumptions.
-
-* ``GMMModeJump`` (Method 2) -- periodically fits a Gaussian mixture (K by BIC)
-  to the shared pool over a chosen set of continuous dims, then proposes a
-  covariance-aware hop ``x' = mu_t + L_t @ L_c^{-1} @ (x - mu_c)`` from the
-  current mode c to a target mode t. This explicitly handles modes with
-  DIFFERENT distributions (each has its own mean and covariance). The proposal
-  is not symmetric, so it returns the exact log proposal ratio (Tjelmeland &
-  Hegstad 2001 mode-jumping form), including the affine Jacobian.
-
-Both learn the modes online -- nothing about location, count, width, or axis is
-hard-coded.
+Shares one ``CrossChainPool`` across all chains: hot chains (which visit
+every mode) feed proposals to a stuck cold chain. ``PopulationDEJump`` is
+symmetric DE; ``GMMModeJump`` fits a covariance-aware hop and returns the
+exact log proposal ratio in the Tjelmeland & Hegstad (2001) mode-jumping
+form, including the affine Jacobian.
 """
 
 from __future__ import annotations
@@ -42,9 +15,9 @@ import numpy as np
 class CrossChainPool:
     """Fixed-capacity ring buffer of recent positions from all chains.
 
-    Fed on every proposal call (any temperature), so it accumulates samples from
-    every mode the hot chains visit. Not thread-safe -- the EMRI run uses
-    threads=1 (FEW is not thread-safe), matching impulse's own buffers.
+    Fed by every chain on every call, so it captures samples from every
+    mode the hot chains visit. Not thread-safe, matching impulse's own
+    buffers (the EMRI run uses threads=1 since FEW isn't thread-safe).
     """
 
     def __init__(self, ndim: int, capacity: int = 20000):
@@ -74,7 +47,7 @@ class CrossChainPool:
 
 
 class PopulationDEJump:
-    """Method 1: cross-chain differential-evolution jump. Symmetric (qxy = 0)."""
+    """Method 1: cross-chain DE jump; symmetric (qxy = 0)."""
 
     __name__ = "popde"  # impulse inspects proposal.__name__ (special-cases 'de')
 
@@ -112,10 +85,9 @@ class PopulationDEJump:
 class GMMModeJump:
     """Method 2: adaptive Gaussian-mixture, covariance-aware mode jump.
 
-    Models only ``dims`` (a set of continuous, non-periodic coordinates -- the
-    whitened intrinsic block by default). Angle/phase dims are left untouched by
-    the jump because they are periodic and not Euclidean-Gaussian. Refits every
-    ``refit_every`` calls once the pool holds ``min_pool`` samples.
+    Models only ``dims`` (continuous, non-periodic coords); angle/phase
+    dims are left untouched. Refits every ``refit_every`` calls once the
+    pool holds ``min_pool`` samples.
     """
 
     __name__ = "gmm_mode"
@@ -231,7 +203,7 @@ class GMMModeJump:
 
 def build_mode_jumps(method: str, ndim: int, dims, weight: float = 25.0,
                      pool_capacity: int = 20000, seed: int = 0):
-    """Return a list of (proposal, weight) for the chosen method, sharing one pool.
+    """Return [(proposal, weight), ...] for method, sharing one pool.
 
     method: "none" | "popde" | "gmm" | "popde+gmm".
     ``dims`` are the coordinates the GMM models.

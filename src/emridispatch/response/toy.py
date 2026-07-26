@@ -1,9 +1,7 @@
 """Toy Gaussian injection model: no waveforms, no heavy dependencies.
 
-A stand-in InjectionModel for pipeline/integration testing and for exercising
-sampler backends on a laptop: ln L is an independent Gaussian centred on the
-injected truth in the 12-D sampling coordinates. Select with
-`data.response: toy`. NOT physics -- structure verification only.
+ln L: independent Gaussian centred on truth in 12-D sampling coords.
+Select with data.response: toy. NOT physics -- structure checks only.
 """
 
 import logging

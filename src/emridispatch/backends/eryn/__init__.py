@@ -1,26 +1,8 @@
 """eryn EnsembleSampler backend (optional: `pip install emridispatch[eryn]`).
 
-Everything eryn-specific lives here: the whitened-prior logpdf adapter, the
-walker scatter around the SamplingProblem start point, the tempering_kwargs
-mapping, the eryn_chain.h5 HDF backend + resume semantics, and the acceptance
-reporting. The likelihood/prior/reparam come unchanged from problem.wrapped().
-
-Config (`sampler:` section; the eryn subsection is all optional):
-    backend: eryn
-    nsamples: 10000         # stored steps per invocation (resume appends)
-    eryn:
-      nwalkers: 32          # ensemble walkers per temperature rung
-      ntemps: 1             # 1 -> untempered; >1 builds an eryn ladder
-      Tmax: null            # top ladder temperature (.inf allowed)
-      adaptive_temps: true  # Vousden ladder adaptation
-      adaptation_lag: 10000
-      adaptation_time: 100
-      stop_adaptation: -1   # step to freeze the ladder (-1: never)
-      burn: 0               # in-sampler burn-in (not stored); skipped on resume
-      thin_by: 1
-      progress: false
-      start_spread: 1.0     # walker scatter around the start, in proposal sigmas
-      move: stretch         # the only supported move in this version
+Config: sampler.eryn (nwalkers, ntemps, Tmax, adaptive_temps,
+adaptation_lag/time, stop_adaptation, burn, thin_by, start_spread,
+move; only "stretch" is supported).
 """
 
 import json
@@ -45,10 +27,8 @@ def _coerce(o):
 class _WhitenedPrior:
     """problem.wrapped().lnprior -> the eryn prior interface.
 
-    eryn only needs .logpdf (batched) plus a .key_order attribute in the
-    non-reversible-jump path. key_order MUST be a scalar: h5py round-trips
-    list attrs as numpy arrays and eryn's resume equality check on dicts of
-    arrays raises ValueError; a scalar int compares cleanly.
+    key_order must be a scalar int, not a list: h5py round-trips list
+    attrs as arrays, breaking eryn's resume equality check on dicts.
     """
 
     def __init__(self, lnprior, ndim):
@@ -68,9 +48,8 @@ def _initial_walkers(x0, proposal_cov, prior, ntemps, nwalkers, rng,
                      spread=1.0, max_tries=100):
     """(ntemps, nwalkers, ndim) scatter around the whitened start point.
 
-    Draws x0 + spread * chol(proposal_cov) @ randn per walker, redrawing rows
-    with non-finite prior; stubborn rows fall back to x0 exactly (x0 has
-    finite prior by construction).
+    Redraws walkers with non-finite prior; after max_tries, remaining
+    rows are pinned to x0 (finite prior by construction).
     """
     x0 = np.asarray(x0, dtype=float)
     ndim = x0.size
@@ -103,9 +82,10 @@ class ErynBackend:
     name = "eryn"
 
     def run(self, problem, cfg, resume=True):
-        """Build the EnsembleSampler from the SamplingProblem, sample, and
-        write run_summary.json. Returns the summary dict (None if run_mcmc
-        raised a ValueError, mirroring the impulse backend contract)."""
+        """Build the sampler, run it, and write run_summary.json.
+
+        Returns None if run_mcmc raises ValueError (impulse contract).
+        """
         try:
             from eryn.backends import HDFBackend
             from eryn.ensemble import EnsembleSampler

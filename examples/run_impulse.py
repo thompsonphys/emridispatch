@@ -1,10 +1,7 @@
 """Start a PE run without the installed CLI hooks.
 
-Usage:
-    python examples/run_impulse.py [path/to/config.yaml]
-
-With no argument this script uses the impulse_config.yaml in this example folder. 
-Requires the impulse extra: pip install -e .[impulse]
+Usage: python examples/run_impulse.py [config.yaml] (default
+impulse_config.yaml). Requires: pip install -e .[impulse]
 """
 
 # Keep per-eval BLAS/OMP single-threaded and neutralize lisatools' bare

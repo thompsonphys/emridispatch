@@ -1,15 +1,6 @@
 """Per-stage timing profile of the EMRI waveform -> response -> likelihood path.
 
-Run on two machines and diff the JSON to find where a GPU is losing time.
-Separates the three things that get conflated in an end-to-end wall time:
-FEW waveform generation, the TDI response, and the likelihood inner products --
-plus a forced-CPU waveform, which measures the host CPU rather than the device.
-
-Usage:
-    python tests/benchmark/bench_stages.py                      # default sweep
-    python tests/benchmark/bench_stages.py --durations 0.1 0.5 2.0 --repeat 5
-    python tests/benchmark/bench_stages.py --device cpu         # CUDA_VISIBLE_DEVICES=""
-    python tests/benchmark/bench_stages.py --json prof_a100.json
+Usage: python tests/benchmark/bench_stages.py [--durations ...] [--device cpu]
 """
 
 import argparse
@@ -45,8 +36,7 @@ def _sync():
 def _free():
     """Drop cupy's cached blocks between stages.
 
-    Each stage holds its own multi-GB waveform buffers; without this the later
-    stages OOM on a consumer card even though no stage is individually large.
+    Skipping this OOMs later stages on consumer cards.
     """
     import gc
 

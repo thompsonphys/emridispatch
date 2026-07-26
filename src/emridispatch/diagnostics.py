@@ -1,41 +1,10 @@
 """Convergence / mixing diagnostics for the EMRI cold chain(s).
 
-Reads the cold rung of one or more run directories through the common results
-layer (results.h5 when present, else an in-memory convert of the raw backend
-output -- diagnostics never parse backend-specific chain files) and reports
-the standard MCMC health metrics, using arviz (rank-normalized split-R-hat and
-bulk/tail ESS, Vehtari+2021) with an emcee integrated-autocorrelation-time
-cross-check. Requires the diagnostics extra: `pip install emridispatch[diagnostics]`.
-
-Only the cold rung is a posterior sample, as the hot rungs are tempered and are
-not drawn from the target. Independent cold chains therefore come from separate
-runs (different seeds / outdirs), not from the other temperature files.
-
-Ensemble backends (eryn): the stored cold chain interleaves nwalkers walkers
-step-major. Walkers are coupled by the ensemble move, so they are NOT treated
-as independent chains for R-hat -- R-hat always compares whole runs (seeds).
-Autocorrelation-based stats (tau, ESS, Geweke) instead need genuine time
-series, so the flattened chain is un-interleaved back into per-walker series
-(emcee's canonical estimator; walker coupling makes the total ESS mildly
-optimistic). `burn` means time steps per chain for every backend (for eryn one
-step = nwalkers stored rows).
-
-Coordinates: by default diagnostics run in the sampling coordinates the sampler
-actually explored (the right space to judge mixing). With reparam mode "auto" the
-intrinsic block (cols 0..5) is whitened, so those columns are u-coords; pass
---physical to invert them back to physical params (masses in log) for the summary.
-
-Usage
------
-    # single run: tau / ESS / Geweke burn-in (R-hat needs >= 2 chains)
-    emridispatch-diagnostics chains_emri
-
-    # several independent seeds -> real R-hat across cold chains
-    emridispatch-diagnostics chains_seed1 chains_seed2 chains_seed3
-
-    # apply a burn-in, or let Geweke suggest one
-    emridispatch-diagnostics chains_emri --burn 2000
-    emridispatch-diagnostics chains_emri --sweep
+Reads the cold rung via the common results layer (results.h5, else
+converted raw output). Only the cold rung is a posterior sample --
+hot rungs are tempered; independent chains need separate runs.
+`burn` counts time steps per chain, so for eryn one step is nwalkers
+stored rows. Requires `pip install emridispatch[diagnostics]`.
 """
 
 import argparse
@@ -62,10 +31,9 @@ def _chain_data(res, rung, physical):
 def load_chain(run_dir, rung=0, physical=False):
     """Return (samples[N, NDIM], lnlike[N]) for one temperature rung of a run dir.
 
-    Loads through the common results layer (results.h5 first, else convert);
-    rung 0 is the cold chain. physical=True selects the reparam-inverted
-    coordinates when the run stored a whitening transform (a temperature-
-    independent coordinate map, so valid for hot rungs too).
+    Loads results.h5 if present, else converts raw output; rung 0 is
+    the cold chain. physical=True returns reparam-inverted coords
+    (whitening is a temperature-independent map, valid on hot rungs).
     """
     res = load_or_convert(run_dir)
     samples, lnlike = _chain_data(res, int(rung), physical)
@@ -80,10 +48,9 @@ def load_cold_chain(run_dir, physical=False):
 def _walker_series(res, samples, lnlike):
     """Un-interleave one run's cold chain into per-walker time series.
 
-    Returns (samples[nsteps, nw, ndim], lnlike[nsteps, nw]). Single-chain
-    backends (impulse) get nw=1. eryn's step-major flattening is inverted
-    exactly via config nwalkers; if that is missing or inconsistent, fall back
-    to nw=1 with a warning (autocorrelation stats then see interleaved rows).
+    Returns (samples[nsteps, nw, ndim], lnlike[nsteps, nw]); nw=1
+    unless eryn (uses config nwalkers). Missing/bad config falls back
+    to nw=1, which biases autocorrelation stats.
     """
     nw = 1
     if res.backend == "eryn":
@@ -102,13 +69,11 @@ def _walker_series(res, samples, lnlike):
 def stack_chains(run_dirs, burn=0, physical=False):
     """Load all cold rungs, drop `burn` time steps, truncate to common lengths.
 
-    Returns (post, series), both name -> array dicts for arviz.from_dict:
-      post    (nruns, ndraw)    one flattened chain per run dir -- the R-hat
-                                view (walkers within a run are coupled, so
-                                only whole runs count as independent chains)
-      series  (nchains, nsteps) per-walker time series pooled over runs -- the
-                                autocorrelation view for tau/ESS/Geweke
-    For single-chain backends the two views hold identical data.
+    Returns (post, series) name -> array dicts for arviz.from_dict:
+    post is (nruns, ndraw), one chain per run dir (the R-hat view;
+    walkers in a run are coupled, so only whole runs are independent);
+    series is (nchains, nsteps), per-walker series pooled over runs
+    (the autocorrelation view for tau/ESS/Geweke).
     """
     cols, lnls, wcols, wlnls = [], [], [], []
     for d in run_dirs:

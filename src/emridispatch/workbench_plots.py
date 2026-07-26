@@ -1,25 +1,8 @@
 """Injection and template diagnostic plots for the workbench.
 
-Four views of one parameter set against the injected data:
-
-    plot_time_frequency    STFT of the time-domain strain
-    plot_char_strain       f|h(f)| over the sensitivity curve
-    plot_snr_accumulation  cumulative SNR against frequency
-    plot_time_domain       h(t), or the residual d - h
-
-Every plot takes the injection model, an optional parameter set (None means the
-injection itself), and a `show` tuple naming which traces to overlay:
-
-    "template"   the parameter set passed in; noise-free
-    "injection"  the noiseless injected signal
-    "data"       model.data_residual_array; carries noise when add_noise is on
-    "noise"      d - h_injection, the realization alone
-
-All return (fig, axes) and write no files. Physics knobs are explicit keyword
-arguments, `stft_kwargs` forwards to scipy.signal.stft, and **kwargs forwards to
-the primary matplotlib artist.
-
-Needs matplotlib: pip install emridispatch[viz]
+`show` selects "template"/"injection"/"data"/"noise" traces; all
+functions return (fig, axes), write no files, and pass **kwargs to
+the matplotlib artist. Needs matplotlib: pip install emridispatch[viz]
 """
 
 from __future__ import annotations
@@ -71,13 +54,7 @@ def _physical(model, params):
 
 
 def _template_spectrum(model, params):
-    """Frequency-domain array of the template for `params`.
-
-    params=None means the injection itself, which routes through the cached
-    injection_template rather than a fresh generate_signal: the model does not
-    cache generate_signal, so every params=None plot would otherwise pay for a
-    full waveform generation.
-    """
+    """Frequency-domain template for `params`; None takes the cached injection."""
     if params is None:
         return _arr(injection_template(model))
     return _arr(_as_template(model, _physical(model, params)))
@@ -98,12 +75,7 @@ def _spectra(model, params, show):
 
 
 def _time_domain_length(model):
-    """Time-domain sample count behind the frequency-domain data.
-
-    Read from the data's input_signal_domain rather than inferred from the
-    number of frequency bins: nf = N // 2 + 1 maps both an even N and the odd
-    N + 1 to the same nf, so the bin count cannot recover the parity.
-    """
+    """Padded time-domain sample count the frequency-domain data was built at."""
     data = model.data_residual_array
     settings = getattr(data, "init_kwargs", {}).get("input_signal_domain")
     n = getattr(settings, "N", None)
@@ -116,20 +88,10 @@ def _time_domain_length(model):
 
 
 def _to_time_domain(model, spectrum, n):
-    """Time-domain reconstruction of a frequency-domain trace, trimmed to `n`.
+    """Strain-amplitude reconstruction of a spectrum, trimmed to `n` samples.
 
-    Amplitude: lisatools builds its frequency-domain arrays with numpy --
-    TDSignal.fft does `rfft(arr * window, axis=-1) * dt` and FDSignal.ifft
-    inverts it with `irfft(arr, axis=-1) / dt`. The 1/dt here is that same
-    factor, so the result carries the strain amplitude of the original series.
-
-    Length: the transform is always taken at the length data_residual_array was
-    built at, which is the zero-padded FFT grid (next_fast_len of the
-    generator's native length), and sliced afterwards. An irfft at the shorter
-    native length instead reinterprets bins spaced 1/(N_pad*dt) as if they were
-    spaced 1/(N_native*dt), which time-compresses the trace into something
-    uncorrelated with the signal. The padding is trailing zeros, so the leading
-    n samples are exact.
+    Inverted on the padded grid, matching lisatools' `irfft(arr) / dt`; an irfft
+    at the shorter native length would mis-space the bins.
     """
     full = np.fft.irfft(spectrum, n=_time_domain_length(model), axis=-1)
     return full[..., :n] / model.delta_t
@@ -203,9 +165,58 @@ def _shade(axis, bands):
         axis.axvspan(lo, hi, color="0.8", alpha=0.5, zorder=0)
 
 
+def _default_nperseg(n):
+    """STFT window for an `n`-sample series: 2**floor(log2(sqrt(n)))."""
+    n = int(n)
+    if n < 8:
+        return n
+    return int(min(n, max(8, 2 ** int(np.floor(np.log2(np.sqrt(n)))))))
+
+
+def _log_norm(amplitude, dynamic_range):
+    """(norm, clipped amplitude, floor) for `dynamic_range` dB below the peak.
+
+    Norm and floor are None when nothing is positive.
+    """
+    from matplotlib.colors import LogNorm
+
+    peak = float(np.nanmax(amplitude)) if amplitude.size else 0.0
+    if not np.isfinite(peak) or peak <= 0.0:
+        return None, amplitude, None
+    floor = peak * 10.0 ** (-float(dynamic_range) / 20.0)
+    return LogNorm(vmin=floor, vmax=peak), np.maximum(amplitude, floor), floor
+
+
+def _auto_flim(f, amplitude, floor):
+    """Frequency limits framing the bins that rise above `floor`, padded 2x."""
+    if floor is None:
+        return f[0], f[-1]
+    band = f[np.nanmax(amplitude, axis=-1) > floor]
+    if not band.size:
+        return f[0], f[-1]
+    return max(band.min() / 2.0, f[0]), min(band.max() * 2.0, f[-1])
+
+
+def _auto_tlim(t, amplitude, floor):
+    """Time limits framing the segments that rise above `floor`, padded 2%."""
+    if floor is None:
+        return t[0], t[-1]
+    span = t[np.nanmax(amplitude, axis=0) > floor]
+    if not span.size:
+        return t[0], t[-1]
+    pad = 0.02 * float(span.max() - span.min())
+    return max(span.min() - pad, t[0]), min(span.max() + pad, t[-1])
+
+
 def plot_time_frequency(model, params=None, *, show=("template",), channel=None,
-                        stft_kwargs=None, ax=None, **kwargs):
-    """Spectrogram of each shown trace, one panel per channel per trace."""
+                        dynamic_range=60.0, flim=None, tlim=None,
+                        colorbar=True, stft_kwargs=None, ax=None, **kwargs):
+    """Spectrogram of each shown trace, one panel per channel per trace.
+
+    Colour is log |STFT|, `dynamic_range` dB below each panel's peak
+    (f=0 dropped); `flim`/`tlim` default to the band/span above floor,
+    else pass (lo, hi); `dynamic_range=None` or norm/vmin/vmax disables it.
+    """
     from scipy.signal import stft
 
     plt = _require_plotting()
@@ -214,19 +225,38 @@ def plot_time_frequency(model, params=None, *, show=("template",), channel=None,
     times, series = _time_series(model, params, names, "plot_time_frequency")
     fs = 1.0 / float(times[1] - times[0])
     first = next(iter(series.values()))
-    opts = dict(nperseg=min(256, first.shape[-1]))
+    opts = dict(nperseg=_default_nperseg(first.shape[-1]))
     opts.update(stft_kwargs or {})
+    scaled_by_caller = bool({"norm", "vmin", "vmax"} & set(kwargs))
 
     fig, axes = _axes(plt, ax, len(chan_names) * len(names))
     panel = 0
+    spans = []
     for trace in names:
         strain = series[trace]
         for chan_name, i in zip(chan_names, indices):
             f, t, Z = stft(strain[i], fs=fs, **opts)
-            axes[panel].pcolormesh(t, f, np.abs(Z), shading="auto", **kwargs)
+            f, amplitude = f[1:], np.abs(Z[1:])
+            mesh_kwargs = dict(kwargs)
+            floor = None
+            if dynamic_range is not None and not scaled_by_caller:
+                norm, amplitude, floor = _log_norm(amplitude, dynamic_range)
+                if norm is not None:
+                    mesh_kwargs["norm"] = norm
+            mesh = axes[panel].pcolormesh(t, f, amplitude, shading="auto",
+                                          **mesh_kwargs)
             axes[panel].set_yscale("log")
+            axes[panel].set_ylim(*(flim if flim is not None
+                                   else _auto_flim(f, amplitude, floor)))
             axes[panel].set_ylabel(f"{trace} {chan_name}  f [Hz]")
+            spans.append(_auto_tlim(t, amplitude, floor))
+            if colorbar:
+                fig.colorbar(mesh, ax=axes[panel], label="|STFT|")
             panel += 1
+    span = tlim if tlim is not None else (min(lo for lo, _ in spans),
+                                          max(hi for _, hi in spans))
+    for axis in axes:
+        axis.set_xlim(*span)
     axes[-1].set_xlabel("t [s]")
     return fig, axes
 
@@ -261,9 +291,8 @@ def plot_snr_accumulation(model, params=None, *, show=("template",),
                           show_notch=True, ax=None, **kwargs):
     """Cumulative SNR against frequency, summed over channels.
 
-    "template" and "injection" accumulate optimal SNR and are monotonic. "data"
-    and "noise" accumulate the detected statistic and its noise part; both can
-    decrease and go negative.
+    "template"/"injection" accumulate optimal SNR and are monotonic; "data"/
+    "noise" accumulate the detected statistic and can decrease or go negative.
     """
     plt = _require_plotting()
     _require(model, "sensetivity_matrix", "plot_snr_accumulation")
@@ -313,11 +342,7 @@ def plot_snr_accumulation(model, params=None, *, show=("template",),
 
 def plot_time_domain(model, params=None, *, show=("template",), residual=False,
                      whiten=False, ax=None, **kwargs):
-    """h(t) per channel for each shown trace.
-
-    residual=True replaces the template trace with d - h(params), which differs
-    from the "noise" trace (d - h(injection)) unless params is None.
-    """
+    """h(t) per channel; residual=True plots d - h(params), not d - h(injection)."""
     plt = _require_plotting()
     _require(model, "channel_list", "plot_time_domain")
     names = _check_traces(model, show)

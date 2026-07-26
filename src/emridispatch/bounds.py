@@ -1,18 +1,8 @@
 """Prior box + proposal covariance + reparam whitening, with an OUTDIR cache.
 
-The Fisher precision that sizes the prior is expensive, so the first run builds
-the box + correlated proposal + reparam from it and caches them to
-OUTDIR/prior_bounds.npz; every later restart loads the cache and skips the Fisher.
-
-The Fisher compute lives behind emridispatch.fisher (optional providers).
-Everything here is pure numpy given a FisherResult.
-
-Sampling-vector order (masses in log), matching the likelihood:
-    [ln m1, ln m2, a, p, e, dist, q_s, phi_s, q_k, phi_k, phi_phi, phi_r]
-The first six are Fisher +/- SCALE*sigma boxes; the last six get their full
-physical ranges (polar angles [0, pi]; azimuthal angles / phases [0, 2*pi]).
-Periodicity is carried as metadata on the JointPrior; the box itself is a
-plain bound.
+Sampling order: ln m1, ln m2, a, p, e, dist, q_s, phi_s, q_k, phi_k,
+phi_phi, phi_r; first six are Fisher +/- scale*sigma boxes, rest are
+full physical ranges (angles [0, pi]; phases [0, 2*pi]).
 """
 
 import logging
@@ -48,9 +38,8 @@ def fisher_cache_key(tdi, foreground, duration, delta_t, channels):
 
 
 def _box_from_ingredients(center, sigmas, box_scale):
-    """(mins, maxes) for the full 12-D box from the intrinsic linear centre +
-    Fisher sigmas at a given scale. The six angle/phase rows are fixed physical
-    ranges, independent of the scale."""
+    """(mins, maxes) for the 12-D box from the intrinsic centre + Fisher
+    sigmas at the given scale; angle/phase rows are fixed physical ranges."""
     center = np.asarray(center, float)
     sigmas = np.asarray(sigmas, float)
     rows = []
@@ -82,9 +71,8 @@ def _build_reparam(reparam_mode, ndim, reparam_idx, cov_intrinsic, truth_vec):
 
 
 def box_ingredients(prec_dict, injection_parameters):
-    """(center, sigmas) in INTRINSIC_ORDER, linear coords -- the raw Fisher
-    products the box is derived from (cached so the box can be re-scaled on
-    load without re-running the Fisher)."""
+    """(center, sigmas) in INTRINSIC_ORDER, linear coords; cached so the
+    box can be re-scaled on load without re-running the Fisher."""
     center = np.array([injection_parameters[p] for p in INTRINSIC_ORDER], float)
     sigmas = np.array([prec_dict[p] for p in INTRINSIC_ORDER], float)
     return center, sigmas
@@ -118,13 +106,12 @@ def build_prior_bounds(prec_dict, cov_lin, cov_order, injection_parameters,
 def save_prior_bounds(path, mins, maxes, sample_cov, reparam,
                       box_scale=None, prec_dict=None, injection_parameters=None,
                       reparam_mode=None, fisher_key=None):
-    """Cache the box + proposal + reparam. When the Fisher ingredients are given,
-    also store box_scale / center / sigmas so a later run with a different
-    prior.box_scale can re-derive the box without re-running the Fisher.
-    reparam_mode is stored so a resume can detect that its cached transform was
-    built in a different coordinate system (auto vs grid). fisher_key (see
-    fisher_cache_key) is stored so a resume can detect that the cached bounds
-    were computed under a different Fisher-relevant configuration."""
+    """Cache the box + proposal + reparam to path.
+
+    Also stores box_scale/center/sigmas (rescale without refitting the
+    Fisher), reparam_mode (detect an auto-vs-grid mismatch on resume), and
+    fisher_key (detect a differing Fisher config on resume), when given.
+    """
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     extra = {}
     if box_scale is not None and prec_dict is not None and injection_parameters is not None:
@@ -143,14 +130,9 @@ def load_prior_bounds(path, ndim, reparam_idx, reparam_mode,
                       box_scale=DEFAULT_BOX_SCALE, fisher_key=None):
     """Resume-path load. Returns (mins, maxes, sample_cov, reparam, reparam_mode).
 
-    If the requested box_scale differs from the cached one and the cache carries
-    the Fisher ingredients, the box is re-derived at the new scale (no Fisher
-    re-run). Tolerates older caches: a missing sample_cov -> a diagonal
-    box-scaled proposal; a missing reparam transform -> reparam_mode downgraded
-    to 'off' (so a fresh run is needed to regenerate the whitening).
-
-    When fisher_key is given it is checked against the one stored at save time:
-    a mismatch raises ValueError; a cache predating the field warns and proceeds.
+    Raises ValueError on a fisher_key mismatch. A box_scale mismatch
+    re-derives the box from cached Fisher sigmas (no re-run); older caches
+    missing sample_cov/reparam fall back to a diagonal cov / mode 'off'.
     """
     cache = np.load(path)
     mins, maxes = cache["mins"], cache["maxes"]

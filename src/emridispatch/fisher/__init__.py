@@ -1,26 +1,16 @@
 """Fisher-matrix providers: how the prior box and proposal covariance get sized.
 
-The Fisher is OPTIONAL infrastructure. StableEMRIFisher (extras
-`emridispatch[fisher]`) is one provider; a manual provider reads user-supplied
-sigmas / a covariance file from the config; a heuristic provider produces rough
-defaults so the pipeline runs end-to-end with no Fisher code installed at all.
+Optional infrastructure; providers are sef (StableEMRIFisher), manual
+(prior.sigmas / prior.covariance_file from config), or heuristic (rough
+fallback). Selected via prior.fisher: auto | sef | manual | none, where
+auto resolves to manual if configured, else sef if importable, else
+heuristic. Providers implement
 
-Every provider implements
+    compute(injection_parameters, duration=..., delta_t=...,
+            use_gpu=None) -> FisherResult
 
-    provider.compute(injection_parameters, duration=..., delta_t=...,
-                     use_gpu=None) -> FisherResult
-
-with FisherResult carrying the diagonal 1-sigma errors, the full 6x6 intrinsic
-covariance (linear coordinates), and the parameter order
-[mass_1, mass_2, a, p, e, luminosity_distance].
-
-Config (`prior:` section):
-    fisher: auto | sef | manual | none
-      auto   - manual if sigmas/covariance configured, else StableEMRIFisher if
-               importable, else the heuristic fallback (with a loud warning).
-      sef    - StableEMRIFisher, error if not installed.
-      manual - prior.sigmas mapping and/or prior.covariance_file (npz).
-      none   - heuristic defaults.
+carrying diagonal 1-sigma errors and the 6x6 intrinsic covariance in
+linear coords, ordered [mass_1, mass_2, a, p, e, luminosity_distance].
 """
 
 from dataclasses import dataclass

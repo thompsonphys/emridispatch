@@ -1,8 +1,7 @@
 """Duck-typed stand-in for a lisatools injection model.
 
-Provides only the surface the workbench touches, with a diagonal sensitivity
-matrix and deterministic arrays, so the measure plumbing is testable without
-lisatools, FEW, or a GPU.
+Diagonal sensitivity matrix, deterministic arrays; no lisatools, FEW,
+or GPU needed.
 """
 
 from types import SimpleNamespace
@@ -19,12 +18,7 @@ N_TIME_NATIVE = 124
 
 
 def _arr(obj):
-    """Channel array for a container, an inner domain, or a bare array.
-
-    Shares a name with workbench._arr but is deliberately a separate
-    implementation: importing the helper this stub exists to validate would make
-    the check circular.
-    """
+    """Channel array for a container, an inner domain, or a bare array."""
     inner = getattr(obj, "data_res_arr", obj)
     return np.asarray(getattr(inner, "arr", inner))
 
@@ -62,12 +56,8 @@ class _InnerDomain:
 class _Domain:
     """The outer DataResidualArray-shaped wrapper around an _InnerDomain.
 
-    Mirrors how the real wrapper splits its surface: .settings and .init_kwargs
-    live here, while arr, f_arr and df are reachable only through .data_res_arr.
-    The real wrapper has no arr at all, and defines f_arr and df as properties
-    over private attributes nothing ever assigns, so all three raise on every
-    instance -- and must raise here too, or a direct read fails only on real
-    data instead of in the unit suite.
+    arr, f_arr and df raise here as they do on the real wrapper, reachable only
+    through .data_res_arr; .settings and .init_kwargs live at this level.
     """
 
     def __init__(self, arr, f_arr, df, n_time=None):
@@ -152,11 +142,8 @@ class StubModel:
     def generate_time_domain(self, params):
         """(times, strain) at the generator's native length, N_TIME_NATIVE.
 
-        Shorter than N_TIME, the length the frequency-domain data was built at,
-        mirroring the real stack: lisatools pads the strain to next_fast_len
-        before the FFT, so a reconstruction has to be taken at N_TIME and sliced
-        back to N_TIME_NATIVE. Keeping the two lengths within a few percent of
-        each other is what makes a length mismatch observable here.
+        Shorter than the padded N_TIME the frequency-domain data was built at,
+        as in the real stack, so a length mismatch is observable.
         """
         n = N_TIME_NATIVE
         times = np.arange(n) * self.delta_t

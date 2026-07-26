@@ -1,15 +1,7 @@
 """Injection / likelihood models behind a pluggable TDI-response interface.
 
-An InjectionModel builds the injected data (waveform + instrument response +
-noise PSD) and evaluates the likelihood of a template against it. The lisatools
-implementation (extras `emridispatch[lisatools]`) is the production one; the
-registry lets other TDI codes plug in without emridispatch changes:
-
-    from emridispatch.response import register_model
-    register_model("mytdi", "mypackage.emri_model:MyEMRILikelihood")
-
-and select it with `data.response: mytdi` in the config. A registered class
-needs a `from_config(cfg)` classmethod (or an __init__ accepting the cfg).
+Register new models via register_model(name, "module:Class"); the class
+needs a from_config(cfg) classmethod. Select with data.response: <name>.
 """
 
 import importlib
@@ -24,12 +16,8 @@ __all__ = ["InjectionModel", "build_injection_model", "register_model"]
 class InjectionModel(ABC):
     """Contract every response/likelihood implementation provides.
 
-    Attributes
-    ----------
-    injection_parameters : dict
-        Physical injection parameters (post any SNR calibration).
-    optimal_snr : float
-        Optimal (signal-only) SNR of the injection.
+    injection_parameters: dict, post-SNR-calibration truth values.
+    optimal_snr: float, the injection's optimal (signal-only) SNR.
     """
 
     injection_parameters: dict
@@ -43,8 +31,7 @@ class InjectionModel(ABC):
     def __call__(self, params) -> float:
         """ln L for the 12-D sampling vector (see emridispatch.parameters).
 
-        Must return a plain float and -inf on any waveform failure -- this is
-        the callable handed to the sampler backends.
+        Must return a plain float, -inf on any waveform failure.
         """
 
     @classmethod
@@ -67,7 +54,7 @@ def register_model(name, target):
 
 
 def build_injection_model(cfg):
-    """Instantiate the model selected by cfg.data.response (default lisatools)."""
+    """Instantiate the model selected by cfg.data.response."""
     name = str(getattr(cfg.data, "response", "lisatools"))
     if name not in _REGISTRY:
         raise ValueError(

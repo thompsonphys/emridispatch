@@ -1,10 +1,8 @@
 """Shared parameter-space definitions for the 12-D EMRI sampling vector.
 
-Sampling-vector order (masses in log), matching the likelihood and diagnostics:
-    [ln m1, ln m2, a, p, e, dist, q_s, phi_s, q_k, phi_k, phi_phi, phi_r]
-The first six are intrinsic/distance; the last six are sky/spin angles + initial
-phases. Inclination x and polar phase phi_theta are not sampled (the
-FastKerrEccentricEquatorial model is equatorial -> Fisher-singular).
+Sampling vector (masses in log): [ln m1, ln m2, a, p, e, dist, q_s,
+phi_s, q_k, phi_k, phi_phi, phi_r]. x and phi_theta are not sampled
+(equatorial model -> Fisher-singular).
 """
 
 import numpy as np

@@ -1,8 +1,7 @@
 """StableEMRIFisher provider (optional: `pip install emridispatch[fisher]`).
 
-Ported from gwsampling's emri/injection_generator.py get_parameter_precision.
-Requires stableemrifisher, fastemriwaveforms (few) and lisatools/fastlisaresponse
-at compute() time only -- the module itself imports clean.
+Needs stableemrifisher, few and lisatools/fastlisaresponse only at
+compute() time; the module itself imports clean.
 """
 
 import logging
@@ -17,12 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 def _gpu_available():
-    """True iff a CUDA device is actually usable (not just cupy importable).
-
-    cupy imports fine on a box whose driver/device is down; the device only
-    fails at first use with CUDARuntimeError. So probe the device count and
-    swallow any error -> a reliable runtime check, unlike `import cupy`.
-    """
+    """True iff a CUDA device is actually usable (not just cupy importable)."""
     try:
         import cupy
 
@@ -50,20 +44,10 @@ class SEFFisherProvider:
 def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
                             use_gpu=None, tdi="2nd generation",
                             foreground=True, channels=None):
-    # use_gpu=None -> auto-detect a usable CUDA device; True/False forces it.
-    # This is the single switch: it drives StableEMRIFisher's own array backend
-    # AND force_backend on the waveform (FastKerr), response (ResponseWrapper) and
-    # orbits (EqualArmlengthOrbits). force_backend="cpu" genuinely runs the whole
-    # Fisher on CPU (RAM, no VRAM limit); None lets FEW/lisatools auto-select the
-    # CUDA backend. NB: the migrated lisatools ignores the old use_gpu kwarg and
-    # defaults to GPU when cupy is importable, so "cpu" MUST be forced explicitly.
     if use_gpu is None:
         use_gpu = _gpu_available()
     force_backend = None if use_gpu else "cpu"
 
-    # On GPU, cupy's pool hoards freed temporaries from earlier waveform
-    # generation; release the cached (unreferenced) blocks so this Fisher's
-    # waveform stack has room. Harmless no-op on CPU.
     if use_gpu:
         try:
             import cupy
@@ -138,11 +122,6 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
         logger.info("fisher: tdi off (no ResponseWrapper, channels %s, "
                     "foreground=%s)", channels, foreground)
     else:
-        # ResponseWrapper's home depends on the lisatools version: newer trees
-        # expose it as lisatools.response, older/installed ones still re-export
-        # the upstream fastlisaresponse.ResponseWrapper (which is also what
-        # lisatools' own EMRI source imports). Try the new path, fall back to the
-        # upstream package so this works across both layouts.
         try:
             from lisatools.response import ResponseWrapper
         except ModuleNotFoundError:
@@ -162,10 +141,7 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
             index_beta=INDEX_BETA,
             t0=t0,
             flip_hx=True,
-            force_backend=force_backend,  # "cpu" or None (GPU auto)
-            # NB: no use_gpu here -- lisatools.response.ResponseWrapper forwards
-            # unknown kwargs to pyResponseTDI, which rejects use_gpu. Backend is
-            # selected via force_backend + the orbits/waveform backends above.
+            force_backend=force_backend,
             is_ecliptic_latitude=False,
             remove_garbage="zero",
             **tdi_kwargs,
@@ -194,12 +170,6 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
         **extra_sef_kwargs,
     )
 
-    # FastKerrEccentricEquatorialFlux is equatorial (xI0 fixed at 1), so xI0 is
-    # NOT a Fisher parameter -- including it makes the matrix singular. Mirror the
-    # StableEMRIFisher reference and vary m1, m2, a, p0, e0, dist. These map onto
-    # exactly the non-angular params the sampler's prior boxes: mass_1, mass_2,
-    # a, p, e, luminosity_distance. (Names must match the wave_params keys:
-    # p0/e0, not p/e.)
     param_names = ["m1", "m2", "a", "p0", "e0", "dist"]
 
     delta_range = dict(
@@ -230,13 +200,7 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
         "dist": "luminosity_distance",
     }
 
-    # delta_range keys are in the same order as param_names -> same order as the
-    # Fisher matrix rows, so param_cov[i, i] lines up with key i.
     order = [key_map[k] for k in delta_range.keys()]
     sigmas = {name: param_cov[i, i] ** (1 / 2) for i, name in enumerate(order)}
-    # Return the diagonal 1-sigma errors (backwards-compatible dict) AND the full
-    # covariance + its parameter order, so the sampler can build a *correlated*
-    # proposal (the mass-distance degeneracy is strong -- a diagonal proposal
-    # drifts along it into a biased edge mode). Order matches sampler indices 0..5:
-    # [mass_1, mass_2, a, p, e, luminosity_distance].
+
     return sigmas, param_cov, order

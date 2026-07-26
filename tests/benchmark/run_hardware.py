@@ -1,15 +1,8 @@
 """End-to-end tests against the real FEW / lisatools / StableEMRIFisher stack.
 
-Not part of the pytest suite. Each case runs in its own subprocess so 
-the device selection is a clean process-level
-choice: CUDA_VISIBLE_DEVICES="" forces FEW *and* lisatools onto their CPU
-backends; leaving it unset lets both auto-select CUDA.
-
-Usage:
-    python tests/benchmark/run_hardware.py                  # all cases
-    python tests/benchmark/run_hardware.py impulse-cpu eryn-gpu
-    python tests/benchmark/run_hardware.py --list
-    python tests/benchmark/run_hardware.py --keep           # keep the run dirs
+Not part of pytest; each case runs in its own subprocess so
+CUDA_VISIBLE_DEVICES selects device for both FEW and lisatools.
+Usage: python tests/benchmark/run_hardware.py [case ...] [--list] [--keep]
 """
 
 import argparse
@@ -325,8 +318,7 @@ def child_main(name, outdir):
 def _extract_error(proc):
     """Pull the traceback out of the child's output.
 
-    Interpreter shutdown emits a wall of `nanobind: leaked ...` lines after any
-    GPU run, which would otherwise bury the actual failure.
+    Filters nanobind's post-GPU-run `leaked` noise that buries it.
     """
     lines = [ln for ln in (proc.stderr or "").splitlines()
              if not ln.startswith("nanobind:") and not ln.startswith(" - leaked")

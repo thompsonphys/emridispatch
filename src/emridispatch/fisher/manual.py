@@ -1,27 +1,10 @@
 """Fisher providers that need no Fisher code: user-configured or heuristic.
 
-ManualFisherProvider reads per-parameter sigmas and/or a full covariance from
-the config:
-
-    prior:
-      fisher: manual
-      sigmas:                       # 1-sigma errors, linear coordinates
-        mass_1: 2.0
-        mass_2: 1.0e-4
-        a: 1.0e-5
-        p: 1.0e-5
-        e: 1.0e-5
-        luminosity_distance: 0.05
-      covariance_file: fisher_cov.npz   # optional; keys: cov [, order]
-
-When only sigmas are given the covariance is diagonal. When only a covariance
-file is given the sigmas are its diagonal square roots. The prior box is
-truth +/- prior.box_scale * sigma, so per-parameter box half-widths are
-expressed as sigmas plus a box_scale.
-
-HeuristicFisherProvider produces rough relative widths so the pipeline runs
-end-to-end without any Fisher at all -- a loud warning marks the result as NOT
-science-quality (the prior box and proposal will be badly scaled for real PE).
+ManualFisherProvider reads prior.sigmas (dict) and/or prior.covariance_file
+(npz with `cov`[, `order`]); missing one is derived from the other, with
+diagonal covariance when only sigmas are given. The box is
+truth +/- prior.box_scale * sigma. HeuristicFisherProvider's widths are
+NOT science-quality -- the box and proposal will be badly scaled.
 """
 
 import logging
