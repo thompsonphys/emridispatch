@@ -108,8 +108,14 @@ class GridReparam(Reparam):
     """Fisher whitening applied in FEW's kerrecceq grid coordinates.
 
     idx must be the physical block (ln m1, ln m2, a, p, e, dist)
-    rows [0..5], mapped through phi before whitening. phi takes the
-    kerrecceq near ("region A") branch, valid for p < p_sep + 9.
+    rows [0..5], mapped through phi before whitening.
+
+    The kerrecceq u coordinate restarts at 0 when p crosses
+    p_sep + DELTAPMAX into the far grid region, so phi stitches the
+    far branch on above u = 1 as ``1 + k * (U - U0)``, matching value
+    and slope at the seam. The stitched u increases monotonically with
+    p over the whole grid (0 at the separatrix to ~1.57 at p = 200),
+    which also lets phi_inv recover the region from u alone.
     log_abs_det_jac is nonzero; add via ReparamCallable(jacobian=True).
     """
 
@@ -118,21 +124,44 @@ class GridReparam(Reparam):
     def _maps():
         # Lazy import: keeps emri.reparam importable (diagnostics, notebooks)
         # on machines without few installed.
-        from few.utils.mappings.kerrecceq import (
-            kerrecceq_forward_map, kerrecceq_backward_map)
-        return kerrecceq_forward_map, kerrecceq_backward_map
+        from few.utils.geodesic import get_separatrix
+        from few.utils.mappings import kerrecceq
+        return kerrecceq, get_separatrix
+
+    @staticmethod
+    def _separatrix(sep, a, e):
+        a = np.asarray(a, float)
+        asign = np.sign(a)
+        asign[asign == 0.0] = 1.0
+        return sep(np.abs(a), np.asarray(e, float), asign)
+
+    @staticmethod
+    def _seam(K, pLSO):
+        """(U0, k) for the far-region stitch u = 1 + k * (U - U0)."""
+        D = K.DELTAPMIN_REGIONB ** -0.5 - (K.PMAX_REGIONB - pLSO) ** -0.5
+        U0 = (K.DELTAPMIN_REGIONB ** -0.5 - K.DELTAPMAX ** -0.5) / D
+        du_dp = K.ALPHA_FLUX / (2.0 * (K.DELTAPMAX - K.DELTAPMIN) * np.log(2.0))
+        return U0, du_dp * D / (0.5 * K.DELTAPMAX ** -1.5)
 
     @staticmethod
     def phi(block):
         """(ln m1, ln m2, a, p, e, dist) -> (ln m1, ln eta, z, u, w, dist).
         Batch-safe on the last axis."""
-        fwd, _ = GridReparam._maps()
+        K, sep = GridReparam._maps()
         b = np.atleast_2d(np.asarray(block, float))
         lm1, lm2 = b[:, 0], b[:, 1]
         q = np.exp(lm2 - lm1)                      # mass ratio m2/m1
         ln_eta = np.log(q) - 2.0 * np.log1p(q)     # eta = q/(1+q)^2, stably
+        a_, p_, e_ = b[:, 2], b[:, 3], b[:, 4]
         with np.errstate(all="ignore"):
-            u, w, y, z = fwd(b[:, 2], b[:, 3], b[:, 4], np.ones(len(b)))
+            u, w, y, z, near = K.kerrecceq_forward_map(
+                a_, p_, e_, np.ones(len(b)), return_mask=True)
+            far = ~np.asarray(near)
+            if np.any(far):
+                U0, k = GridReparam._seam(
+                    K, GridReparam._separatrix(sep, a_[far], e_[far]))
+                u = np.asarray(u, float).copy()
+                u[far] = 1.0 + k * (u[far] - U0)
         v = np.column_stack([lm1, ln_eta, z, u, w, b[:, 5]])
         return v[0] if np.asarray(block).ndim == 1 else v
 
@@ -140,10 +169,13 @@ class GridReparam(Reparam):
     def phi_inv(vblock):
         """(ln m1, ln eta, z, u, w, dist) -> (ln m1, ln m2, a, p, e, dist).
 
-        Rows with (z, u, w) outside [0, 1] return NaN instead of
-        raising; log_abs_det_jac then returns -inf for them.
+        u < 1 inverts the near grid region, u >= 1 the stitched far one.
+        Rows with (z, w) outside [0, 1], or u outside the stitched grid
+        domain, return NaN instead of raising; log_abs_det_jac then
+        returns -inf for them.
         """
-        _, bwd = GridReparam._maps()
+        K, sep = GridReparam._maps()
+        bwd = K.kerrecceq_backward_map
         v = np.atleast_2d(np.asarray(vblock, float))
         eta = np.exp(v[:, 1])
         # Stable small root of eta*q^2 + (2*eta - 1)*q + eta = 0 (rationalized;
@@ -151,15 +183,32 @@ class GridReparam(Reparam):
         with np.errstate(all="ignore"):
             q = 2.0 * eta / ((1.0 - 2.0 * eta) + np.sqrt(1.0 - 4.0 * eta))
             lm2 = v[:, 0] + np.log(q)
-        zuw = v[:, 2:5]
-        ok = np.all(np.isfinite(zuw), axis=1) & np.all(zuw >= 0.0, axis=1) \
-            & np.all(zuw <= 1.0, axis=1)
+        z, u, w = v[:, 2], v[:, 3], v[:, 4]
         a = np.full(len(v), np.nan); p = a.copy(); e = a.copy()
-        if np.any(ok):
+        ok = np.isfinite(z) & np.isfinite(u) & np.isfinite(w) \
+            & (z >= 0.0) & (z <= 1.0) & (w >= 0.0) & (w <= 1.0)
+
+        near = ok & (u >= 0.0) & (u < 1.0)
+        if np.any(near):
             with np.errstate(all="ignore"):
-                a[ok], p[ok], e[ok], _x = bwd(v[ok, 3], v[ok, 4],
-                                              np.ones(int(ok.sum())), v[ok, 2],
-                                              regionA=True)
+                a[near], p[near], e[near], _x = bwd(
+                    u[near], w[near], np.ones(int(near.sum())), z[near],
+                    regionA=True)
+
+        far = ok & (u >= 1.0)
+        if np.any(far):
+            with np.errstate(all="ignore"):
+                a_f, _p, e_f, _x = bwd(
+                    np.zeros(int(far.sum())), w[far], np.ones(int(far.sum())),
+                    z[far], regionA=False)
+                U0, k = GridReparam._seam(
+                    K, GridReparam._separatrix(sep, a_f, e_f))
+                U = U0 + (u[far] - 1.0) / k
+                keep = np.flatnonzero(far)[U <= 1.0]
+                if keep.size:
+                    a[keep], p[keep], e[keep], _x = bwd(
+                        U[U <= 1.0], w[keep], np.ones(keep.size), z[keep],
+                        regionA=False)
         x = np.column_stack([v[:, 0], lm2, a, p, e, v[:, 5]])
         return x[0] if np.asarray(vblock).ndim == 1 else x
 
@@ -173,6 +222,10 @@ class GridReparam(Reparam):
         assert list(self.idx) == [0, 1, 2, 3, 4, 5], \
             "GridReparam assumes the standard intrinsic block idx=[0..5]"
         mu_phys = self.phi_inv(self.mu)
+        if not np.all(np.isfinite(mu_phys)):
+            raise ValueError(
+                "reparam mode 'grid': stored centre is outside the kerrecceq "
+                "grid domain. Delete the cache (or the outdir) to rebuild.")
         J = self._phi_jacobian(mu_phys)
         self._M = np.eye(self.ndim)
         self._M[np.ix_(self.idx, self.idx)] = self._A @ J
@@ -189,6 +242,22 @@ class GridReparam(Reparam):
             J[:, j] = (GridReparam.phi(xp_) - GridReparam.phi(xm_)) / (2.0 * h)
         return J
 
+    @classmethod
+    def _check_domain(cls, x_block):
+        """Raise unless phi is invertible at a physical block point."""
+        K, sep = cls._maps()
+        v = cls.phi(x_block)
+        if np.all(np.isfinite(v)) and np.allclose(
+                cls.phi_inv(v), x_block, rtol=1e-6, atol=1e-9):
+            return
+        a, p, e = float(x_block[2]), float(x_block[3]), float(x_block[4])
+        pLSO = float(np.atleast_1d(cls._separatrix(sep, [a], [e]))[0])
+        raise ValueError(
+            f"reparam mode 'grid' cannot represent p={p:g}: outside the "
+            f"kerrecceq grid domain [{pLSO + K.DELTAPMIN:g}, "
+            f"{K.PMAX_REGIONB:g}] at a={a:g}, e={e:g}. Use reparam.mode "
+            f"'auto'.")
+
     # --- factory ------------------------------------------------------------
     @classmethod
     def from_covariance(cls, ndim, idx, cov_block, mu):
@@ -197,6 +266,7 @@ class GridReparam(Reparam):
         idx = np.asarray(idx, dtype=int)
         mu_phys = np.asarray(mu, dtype=float)
         cov_block = np.asarray(cov_block, dtype=float)
+        cls._check_domain(mu_phys)
         J = cls._phi_jacobian(mu_phys)
         cov_v = J @ cov_block @ J.T
         base = Reparam.from_covariance(ndim, idx, cov_v, cls.phi(mu_phys))
