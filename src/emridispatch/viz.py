@@ -145,7 +145,9 @@ def main():
     ap.add_argument("results",
                     help="results.h5 path, or a directory containing one")
     ap.add_argument("--burn", type=int, default=0,
-                    help="draws to drop from the front of each rung")
+                    help="time steps to drop from the front of each rung "
+                         "(one step is nwalkers draws for ensemble backends, "
+                         "same units as emridisp-diagnostics --burn)")
     group = ap.add_mutually_exclusive_group()
     group.add_argument("--temps", type=int, nargs="+", default=[0],
                        help="temperature rungs to overlay in the marginals "
@@ -155,7 +157,8 @@ def main():
     ap.add_argument("--sampling", action="store_true",
                     help="plot raw sampling coordinates instead of physical")
     ap.add_argument("--thin", type=int, default=1,
-                    help="cosmetic thinning for plot rendering only")
+                    help="keep every Nth time step; cosmetic thinning for plot "
+                         "rendering only")
     ap.add_argument("--outdir", default=None,
                     help="where to write the pngs (default: beside the "
                          "results file)")

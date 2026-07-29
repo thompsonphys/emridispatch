@@ -129,6 +129,15 @@ The stored prior spec reconstructs the exact `JointPrior`
 postprocessing. Conversion needs the `results` extra (h5py); plotting needs
 `viz` (h5py, matplotlib, corner).
 
+An ensemble backend's walkers are pooled into one sample set per rung, so a rung
+holds `nsteps * nwalkers` draws laid out step-major. `nwalkers` is recorded in
+the file, which keeps the `(nsteps, nwalkers)` split recoverable: `--burn` and
+`--thin` count **time steps** in both `emridisp-plot` and `emridisp-diagnostics`
+(so `--burn 500` drops 500 steps, i.e. `500 * nwalkers` draws), and
+`emridisp-diagnostics` rebuilds per-walker time series for honest
+autocorrelation. `Results.ndraws` is the stored row count and `Results.nsteps`
+the step count; they coincide for non-ensemble backends.
+
 ## Architecture
 
 ```

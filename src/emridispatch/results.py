@@ -1,17 +1,24 @@
 """Sampler-agnostic results: raw backend output -> common HDF5 format.
 
 Converts a backend outdir (impulse chain_N.txt; eryn eryn_chain.h5)
-into one format_version 1 results.h5. Requires h5py
+into one format_version 2 results.h5. Requires h5py
 (pip install emridispatch[results]).
 
-Schema; root attrs format_version, backend, ndim, ntemps, nsteps,
-param_names (json), config (json):
-    /chains/samples    (ntemps, nsteps, ndim)  raw sampling coords
-    /chains/lnlike     (ntemps, nsteps)
-    /chains/lnprob     (ntemps, nsteps)
-    /chains/accepted   (ntemps, nsteps)
+Chain axis 1 holds ndraws = nsteps * nwalkers rows, step-major, pooling an
+ensemble backend's walkers into one sample set. nwalkers is stored so the
+(nsteps, nwalkers) factorization stays recoverable: it is what lets burn and
+thin count time steps rather than rows, and what lets diagnostics rebuild
+per-walker time series. Non-ensemble backends store nwalkers = 1, making
+ndraws == nsteps.
+
+Schema; root attrs format_version, backend, ndim, ntemps, nwalkers, nsteps,
+ndraws, param_names (json), config (json):
+    /chains/samples    (ntemps, ndraws, ndim)  raw sampling coords
+    /chains/lnlike     (ntemps, ndraws)
+    /chains/lnprob     (ntemps, ndraws)
+    /chains/accepted   (ntemps, ndraws)
     /temperatures      (ntemps,)               inf allowed (top rung)
-    /physical/samples  (ntemps, nsteps, ndim)  whitening inverted
+    /physical/samples  (ntemps, ndraws, ndim)  whitening inverted
     /truth             sampling_vector, physical_vector; injection json attr
     /meta              config_yaml, run_log, run_summary verbatim
     /prior             spec json attr plus prior_bounds.npz arrays
@@ -33,7 +40,7 @@ from emridispatch.parameters import NDIM, PARAM_NAMES
 
 logger = logging.getLogger(__name__)
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 DEFAULT_NAME = "results.h5"
 
 # Raw impulse chain columns after the ndim parameters.
@@ -54,13 +61,14 @@ def _require_h5py():
 class Results:
     """In-memory view of one run's chains + metadata (see module schema)."""
 
-    samples: np.ndarray            # (ntemps, nsteps, ndim) sampling coords
-    lnlike: np.ndarray             # (ntemps, nsteps)
-    lnprob: np.ndarray             # (ntemps, nsteps)
-    accepted: np.ndarray           # (ntemps, nsteps)
+    samples: np.ndarray            # (ntemps, ndraws, ndim) sampling coords
+    lnlike: np.ndarray             # (ntemps, ndraws)
+    lnprob: np.ndarray             # (ntemps, ndraws)
+    accepted: np.ndarray           # (ntemps, ndraws)
     temperatures: np.ndarray       # (ntemps,)
+    nwalkers: int = 1
     param_names: list = field(default_factory=lambda: list(PARAM_NAMES))
-    physical: np.ndarray | None = None   # (ntemps, nsteps, ndim) or None
+    physical: np.ndarray | None = None   # (ntemps, ndraws, ndim) or None
     truth_sampling: np.ndarray | None = None
     truth_physical: np.ndarray | None = None
     injection: dict | None = None
@@ -79,26 +87,46 @@ class Results:
         return self.samples.shape[0]
 
     @property
-    def nsteps(self):
+    def ndraws(self):
+        """Stored rows per rung: nsteps * nwalkers."""
         return self.samples.shape[1]
+
+    @property
+    def nsteps(self):
+        """Markov time steps per rung, with an ensemble's walkers folded out."""
+        return self.samples.shape[1] // self.nwalkers
 
     @property
     def ndim(self):
         return self.samples.shape[2]
 
+    def _steps(self, data, i):
+        """One rung's rows regrouped as (nsteps, nwalkers, ndim)."""
+        s = data[i]
+        keep = len(s) - len(s) % self.nwalkers
+        return s[:keep].reshape(-1, self.nwalkers, s.shape[-1])
+
     # --- accessors -----------------------------------------------------------
     def rung(self, i, physical=True, burn=0, thin=1):
-        """(nkept, ndim) samples of one rung. thin is cosmetic (plot rendering),
-        not a statistical device -- quote MC error via ESS instead."""
+        """(nkept, ndim) samples of one rung, walkers pooled.
+
+        burn and thin count time steps, not stored rows: one step of an
+        ensemble backend contributes nwalkers rows, and both are applied on the
+        step axis, so thinning drops whole steps instead of selecting a walker
+        subset. This matches the burn units used by
+        emridispatch.diagnostics.stack_chains. thin is cosmetic (plot
+        rendering), not a statistical device -- quote MC error via ESS instead.
+        """
         data = self.physical if physical else self.samples
         if data is None:
             raise ValueError(
                 "no physical-coordinate samples stored (conversion had no "
                 "reparam transform); use physical=False")
-        s = data[i, burn:][::thin]
+        s = self._steps(data, i)[burn:][::thin].reshape(-1, data.shape[-1])
         if len(s) <= 1:
             raise ValueError(
-                f"after burn={burn} only {len(s)} draws remain; reduce --burn")
+                f"after burn={burn} step(s) only {len(s)} draw(s) remain "
+                f"(this run has {self.nsteps} steps); reduce --burn")
         return s
 
     def posterior(self, physical=True, burn=0, thin=1):
@@ -124,7 +152,9 @@ class Results:
             f.attrs["backend"] = self.backend
             f.attrs["ndim"] = self.ndim
             f.attrs["ntemps"] = self.ntemps
+            f.attrs["nwalkers"] = self.nwalkers
             f.attrs["nsteps"] = self.nsteps
+            f.attrs["ndraws"] = self.ndraws
             f.attrs["param_names"] = json.dumps(list(self.param_names))
             f.attrs["config"] = json.dumps(self.config)
 
@@ -176,13 +206,15 @@ class Results:
             if version != FORMAT_VERSION:
                 raise ValueError(
                     f"{path}: results format_version {version} not supported "
-                    f"(expected {FORMAT_VERSION})")
+                    f"(expected {FORMAT_VERSION}); regenerate it with "
+                    f"`emridisp-postprocess {os.path.dirname(path) or '.'} -f`")
             kw = dict(
                 samples=f["chains/samples"][()],
                 lnlike=f["chains/lnlike"][()],
                 lnprob=f["chains/lnprob"][()],
                 accepted=f["chains/accepted"][()],
                 temperatures=f["temperatures"][()],
+                nwalkers=int(f.attrs["nwalkers"]),
                 param_names=json.loads(f.attrs["param_names"]),
                 backend=str(f.attrs["backend"]),
                 config=json.loads(f.attrs["config"]),
@@ -424,7 +456,7 @@ def _convert_impulse(run_dir):
 def _convert_eryn(run_dir):
     """eryn EnsembleSampler raw output (eryn_chain.h5, group "mcmc").
 
-    Flattened STEP-MAJOR into (ntemps, nsteps*nwalkers, ndim): step 0's
+    Flattened step-major into (ntemps, nsteps*nwalkers, ndim): step 0's
     walkers first, then step 1's, etc. `accepted` is each walker's
     acceptance fraction over the stored steps, broadcast per step (not a
     boolean); eryn's counter advances once per stored step, so `iteration`
@@ -478,8 +510,9 @@ def _convert_eryn(run_dir):
 
     return Results(
         samples=samples, lnlike=lnlike, lnprob=lnprob, accepted=accepted,
-        temperatures=temperatures, param_names=list(PARAM_NAMES),
-        backend="eryn", **_load_sidecars(run_dir, samples),
+        temperatures=temperatures, nwalkers=nwalkers,
+        param_names=list(PARAM_NAMES), backend="eryn",
+        **_load_sidecars(run_dir, samples),
     )
 
 

@@ -78,6 +78,28 @@ def test_results_h5_preferred_over_raw(tmp_path):
     assert series["lnlike"].shape == (ERYN_NW, ERYN_IT)
 
 
+def test_walker_series_does_not_depend_on_the_config(tmp_path):
+    """The ensemble width comes from the results file, not from run metadata.
+
+    A killed run has no run_summary.json, so config metadata falls back to the
+    raw config.yaml where nwalkers is nested under sampler.eryn. The old lookup
+    only probed a flat top-level key, silently collapsed to nwalkers=1, and
+    handed the interleaved chain to the autocorrelation estimators as if it
+    were a single time series.
+    """
+    run = make_eryn_run_dir(tmp_path)
+    (run / "run_summary.json").unlink()
+    res = convert(run)
+    assert "nwalkers" not in res.config
+    assert res.nwalkers == ERYN_NW
+
+    res.save(run / "results.h5")
+    _, series = stack_chains([run])
+    assert series["lnlike"].shape == (ERYN_NW, ERYN_IT)
+    for w in range(ERYN_NW):
+        assert np.allclose(series[P0][w], np.arange(ERYN_IT) + 0.1 * w)
+
+
 def test_stack_chains_mixed_backends_common_length(tmp_path):
     runs = [make_run_dir(tmp_path / "imp"), make_eryn_run_dir(tmp_path / "er")]
     post, series = stack_chains(runs)

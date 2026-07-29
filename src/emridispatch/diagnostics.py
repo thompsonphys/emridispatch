@@ -48,19 +48,11 @@ def load_cold_chain(run_dir, physical=False):
 def _walker_series(res, samples, lnlike):
     """Un-interleave one run's cold chain into per-walker time series.
 
-    Returns (samples[nsteps, nw, ndim], lnlike[nsteps, nw]); nw=1
-    unless eryn (uses config nwalkers). Missing/bad config falls back
-    to nw=1, which biases autocorrelation stats.
+    Returns (samples[nsteps, nw, ndim], lnlike[nsteps, nw]). nw comes from the
+    results file's own nwalkers attribute, recorded by the converter from the
+    raw chain shape, so the factorization never depends on parsing a config.
     """
-    nw = 1
-    if res.backend == "eryn":
-        nw = int(res.config.get("nwalkers") or 0)
-        if nw <= 0 or len(samples) % nw:
-            logger.warning(
-                "eryn results without a usable config nwalkers (%r); treating "
-                "the flattened chain as one series -- tau/ESS will be distorted "
-                "by walker interleaving", res.config.get("nwalkers"))
-            nw = 1
+    nw = res.nwalkers
     nsteps = len(samples) // nw
     return (samples[:nsteps * nw].reshape(nsteps, nw, -1),
             lnlike[:nsteps * nw].reshape(nsteps, nw))

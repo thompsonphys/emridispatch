@@ -204,3 +204,61 @@ def test_rung_burn_guard(tmp_path):
     with pytest.raises(ValueError, match="reduce --burn"):
         res.posterior(burn=NSTEPS)
     assert res.posterior(burn=50).shape == (NSTEPS - 50, NDIM)
+
+
+def test_step_counts_record_the_ensemble_width(tmp_path):
+    er = convert(make_eryn_run_dir(tmp_path / "er"))
+    assert er.nwalkers == ERYN_NW
+    assert er.nsteps == ERYN_IT
+    assert er.ndraws == ERYN_IT * ERYN_NW
+
+    # Non-ensemble backends keep one row per step, so the two agree.
+    imp = convert(make_run_dir(tmp_path / "imp"))
+    assert imp.nwalkers == 1
+    assert imp.nsteps == imp.ndraws == NSTEPS
+
+
+def test_rung_burn_counts_steps_not_rows(tmp_path):
+    res = convert(make_eryn_run_dir(tmp_path))
+    kept = res.rung(0, burn=1)
+    assert len(kept) == (ERYN_IT - 1) * ERYN_NW
+    # Param 0 is step + 0.1*walker, so burning one step must land on step 1.
+    assert np.isclose(kept[0, 0], 1.0)
+    assert np.allclose(kept[:ERYN_NW, 0], 1.0 + 0.1 * np.arange(ERYN_NW))
+
+
+def test_rung_thin_drops_whole_steps_not_walkers(tmp_path):
+    res = convert(make_eryn_run_dir(tmp_path))
+    kept = res.rung(0, thin=2)
+    steps = np.arange(0, ERYN_IT, 2)
+    assert len(kept) == len(steps) * ERYN_NW
+    expected = (steps[:, None] + 0.1 * np.arange(ERYN_NW)[None, :]).ravel()
+    assert np.allclose(kept[:, 0], expected)
+    # Every walker survives; thinning must not silently subset the ensemble.
+    assert len({round((v % 1) * 10) for v in kept[:, 0]}) == ERYN_NW
+
+
+def test_rung_burn_guard_reports_steps(tmp_path):
+    res = convert(make_eryn_run_dir(tmp_path))
+    with pytest.raises(ValueError, match=f"this run has {ERYN_IT} steps"):
+        res.rung(0, burn=ERYN_IT)
+
+
+def test_roundtrip_preserves_nwalkers(tmp_path):
+    res = convert(make_eryn_run_dir(tmp_path))
+    path = tmp_path / "results.h5"
+    res.save(path)
+    back = Results.load(path)
+    assert back.nwalkers == ERYN_NW
+    assert back.nsteps == ERYN_IT
+    assert np.allclose(back.rung(0, burn=2), res.rung(0, burn=2))
+
+
+def test_load_rejects_older_format_with_postprocess_hint(tmp_path):
+    import h5py
+
+    path = tmp_path / "old.h5"
+    with h5py.File(path, "w") as f:
+        f.attrs["format_version"] = 1
+    with pytest.raises(ValueError, match="emridisp-postprocess"):
+        Results.load(path)
