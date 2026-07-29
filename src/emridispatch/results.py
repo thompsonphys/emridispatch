@@ -426,7 +426,16 @@ def _convert_eryn(run_dir):
 
     Flattened STEP-MAJOR into (ntemps, nsteps*nwalkers, ndim): step 0's
     walkers first, then step 1's, etc. `accepted` is each walker's
-    cumulative acceptance fraction, broadcast per step (not a boolean).
+    acceptance fraction over the stored steps, broadcast per step (not a
+    boolean); eryn's counter advances once per stored step, so `iteration`
+    is the whole denominator regardless of thin_by.
+
+    Temperatures come from the last stored beta row. eryn only writes
+    `betas` when tempering is active (ntemps > 1); untempered runs leave
+    the dataset at its HDF5 fill value of 0, which would otherwise read
+    back as T = inf for the cold chain, so an all-zero row is treated as
+    an unwritten ladder and mapped to T = 1. A genuine Tmax = inf top rung
+    keeps its beta = 0 because the rest of its row is non-zero.
     """
     h5py = _require_h5py()
     path = os.path.join(run_dir, "eryn_chain.h5")
@@ -459,8 +468,13 @@ def _convert_eryn(run_dir):
     lnprob = flatten(log_like + log_prior)
     accepted = np.tile((acc_counts / it)[:, None, :],
                        (1, nsteps, 1)).reshape(ntemps, nsteps * nwalkers)
-    with np.errstate(divide="ignore"):
-        temperatures = np.where(betas[-1] > 0.0, 1.0 / betas[-1], np.inf)
+    if np.any(betas[-1]):
+        with np.errstate(divide="ignore"):
+            temperatures = np.where(betas[-1] > 0.0, 1.0 / betas[-1], np.inf)
+    else:
+        logger.info("eryn_chain.h5 has no stored betas (untempered run); "
+                    "labelling the single rung T = 1")
+        temperatures = np.ones(ntemps)
 
     return Results(
         samples=samples, lnlike=lnlike, lnprob=lnprob, accepted=accepted,

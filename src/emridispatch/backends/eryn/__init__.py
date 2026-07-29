@@ -196,10 +196,8 @@ class ErynBackend:
                            backend=self.name, ntemps=ntemps,
                            nwalkers=nwalkers, nsamples=nsamples,
                            thin_by=thin_by, seed=seed),
-            # Cumulative per-walker acceptance counts -> per-rung mean rates.
-            "proposal_acceptance": (backend.accepted
-                                    / (it * thin_by)).mean(axis=1),
-            "swap_acceptance": backend.swaps_accepted / (it * thin_by * nwalkers),
+            "proposal_acceptance": (backend.accepted / it).mean(axis=1),
+            "swap_acceptance": backend.swaps_accepted / (it * nwalkers),
         }
         summary_path = os.path.join(outdir, "run_summary.json")
         with open(summary_path, "w") as fh:

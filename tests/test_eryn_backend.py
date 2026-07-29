@@ -90,6 +90,54 @@ def test_eryn_backend_end_to_end_and_resume(toy_cfg):
         assert int(f["mcmc"].attrs["iteration"]) == 40
 
 
+def test_eryn_backend_acceptance_rates_ignore_thin_by(toy_cfg):
+    """Rates must divide by stored steps, not proposals.
+
+    eryn rebuilds its per-step `accepted` array inside the thin_by inner loop
+    and hands save_step only the final one, so both the proposal and swap
+    counters advance once per stored step. Dividing by iteration*thin_by
+    understated every rate by exactly thin_by, and disagreed with the
+    independent normalization in results._convert_eryn.
+    """
+    pytest.importorskip("eryn")
+    h5py = pytest.importorskip("h5py")
+
+    from emridispatch.backends import get_backend
+    from emridispatch.pipeline import build_problem
+    from emridispatch.results import convert
+
+    thin_by, nwalkers, nsamples = 3, 30, 8
+    toy_cfg.sampler.backend = "eryn"
+    toy_cfg.sampler.nsamples = nsamples
+    toy_cfg.sampler.eryn.nwalkers = nwalkers
+    toy_cfg.sampler.eryn.ntemps = 2
+    toy_cfg.sampler.eryn.thin_by = thin_by
+    problem = build_problem(toy_cfg)
+    summary = get_backend("eryn").run(problem, toy_cfg, resume=False)
+
+    with h5py.File(os.path.join(problem.outdir, CHAIN_NAME), "r") as f:
+        it = int(f["mcmc"].attrs["iteration"])
+        raw_accepted = f["mcmc/accepted"][()]
+        raw_swaps = f["mcmc/swaps_accepted"][()]
+    assert it == nsamples
+    assert raw_accepted.max() <= it
+
+    rates = np.asarray(summary["proposal_acceptance"])
+    assert rates.shape == (2,)
+    assert np.all((rates > 0.0) & (rates <= 1.0))
+    assert np.allclose(rates, (raw_accepted / it).mean(axis=1))
+
+    swaps = np.asarray(summary["swap_acceptance"])
+    assert swaps.shape == (1,)
+    assert np.all((swaps >= 0.0) & (swaps <= 1.0))
+    assert np.allclose(swaps, raw_swaps / (it * nwalkers))
+
+    # The converter normalizes the same counters independently; the two
+    # must not drift apart again.
+    res = convert(problem.outdir)
+    assert np.allclose(rates, res.accepted.mean(axis=1))
+
+
 def test_eryn_backend_rejects_too_few_walkers(toy_cfg):
     pytest.importorskip("eryn")
     from emridispatch.backends import get_backend

@@ -165,3 +165,36 @@ def make_eryn_run_dir(tmp_path):
     (tmp_path / "config.yaml").write_text(
         "run:\n  seed: 42\nsampler:\n  backend: eryn\n")
     return tmp_path
+
+
+def make_eryn_untempered_run_dir(tmp_path):
+    """Synthetic eryn_chain.h5 for an ntemps=1 run, the config default.
+
+    eryn builds no TemperatureControl for a single rung, so its State carries
+    no betas and save_step never writes the dataset; it stays at the HDF5 fill
+    value of 0 for every stored step, exactly as reproduced here.
+    """
+    import h5py
+
+    tmp_path.mkdir(exist_ok=True)
+    rng = np.random.default_rng(2)
+    chain = rng.standard_normal((ERYN_IT, 1, ERYN_NW, 1, NDIM))
+
+    with h5py.File(tmp_path / "eryn_chain.h5", "w") as f:
+        g = f.create_group("mcmc")
+        g.attrs["iteration"] = ERYN_IT
+        g.attrs["ntemps"] = 1
+        g.attrs["nwalkers"] = ERYN_NW
+        g.create_dataset("chain/model_0", data=chain)
+        g.create_dataset("log_like", data=np.zeros((ERYN_IT, 1, ERYN_NW)))
+        g.create_dataset("log_prior", data=np.zeros((ERYN_IT, 1, ERYN_NW)))
+        g.create_dataset("betas", data=np.zeros((ERYN_IT, 1)))
+        g.create_dataset("accepted", data=np.full((1, ERYN_NW), 2.0))
+        g.create_dataset("swaps_accepted", data=np.zeros(0))
+
+    summary = {"config": {"backend": "eryn", "ntemps": 1,
+                          "nwalkers": ERYN_NW}}
+    (tmp_path / "run_summary.json").write_text(json.dumps(summary))
+    (tmp_path / "config.yaml").write_text(
+        "run:\n  seed: 42\nsampler:\n  backend: eryn\n")
+    return tmp_path

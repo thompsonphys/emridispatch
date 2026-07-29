@@ -11,7 +11,7 @@ pytest.importorskip("h5py")
 
 from conftest import (
     ERYN_IT, ERYN_NW, ERYN_NT, NSTEPS, TEMPS, TRUTH,
-    make_eryn_run_dir, make_run_dir)
+    make_eryn_run_dir, make_eryn_untempered_run_dir, make_run_dir)
 from emridispatch.parameters import NDIM, PARAM_NAMES
 from emridispatch.priors import (
     CallablePrior, Gaussian, JointPrior, Sine, Uniform, joint_prior_from_specs)
@@ -58,6 +58,23 @@ def test_convert_eryn_shapes_and_flattening(tmp_path):
     # Shared sidecars: truth + config metadata work as for impulse.
     assert np.allclose(res.truth_physical, TRUTH)
     assert res.config["backend"] == "eryn"
+
+
+def test_convert_eryn_untempered_cold_rung_is_unit_temperature(tmp_path):
+    res = convert(make_eryn_untempered_run_dir(tmp_path))
+    assert res.samples.shape == (1, ERYN_IT * ERYN_NW, NDIM)
+    # All-zero betas mean "eryn never wrote a ladder", not T = inf.
+    assert res.temperatures.shape == (1,)
+    assert np.isclose(res.temperatures[0], 1.0)
+    assert np.isclose(res.accepted[0, 0], 2.0 / ERYN_IT)
+
+
+def test_convert_eryn_keeps_genuine_infinite_top_rung(tmp_path):
+    # A real Tmax=inf ladder has beta=0 only in the top rung, so the
+    # untempered fallback must not fire.
+    res = convert(make_eryn_run_dir(tmp_path))
+    assert np.isclose(res.temperatures[0], 1.0)
+    assert np.isinf(res.temperatures[ERYN_NT - 1])
 
 
 def test_eryn_save_load_roundtrip(tmp_path):
