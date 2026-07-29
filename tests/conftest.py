@@ -84,19 +84,28 @@ def toy_cfg(tmp_path):
 NSTEPS = 200
 TEMPS = [1.0, 2.5]
 TRUTH = np.linspace(0.1, 1.2, NDIM)
+LNPRIOR = -1.0
 
 
-def make_run_dir(tmp_path, with_truth=True, with_summary=True, with_spec=False):
-    """Fake impulse run dir: chain_N.txt per rung + shared sidecars."""
+def make_run_dir(tmp_path, with_truth=True, with_summary=True, with_spec=False,
+                 temps=None):
+    """Fake impulse run dir: chain_N.txt per rung + shared sidecars.
+
+    The lnprob column follows impulse's tempered convention,
+    lnprior + lnlike/temp, so converters can be checked against a known
+    constant lnprior. Pass `temps` as a per-rung (NSTEPS,) array to emulate a
+    ladder that adapted mid-run.
+    """
     tmp_path.mkdir(exist_ok=True)
     rng = np.random.default_rng(0)
     for rung, temp in enumerate(TEMPS):
+        temp_col = np.full(NSTEPS, temp) if temps is None else np.asarray(temps[rung])
         cols = np.empty((NSTEPS, NDIM + 4))
         cols[:, :NDIM] = TRUTH + 0.05 * rng.standard_normal((NSTEPS, NDIM))
         cols[:, NDIM] = -0.5 * rng.random(NSTEPS)      # lnlike
-        cols[:, NDIM + 1] = cols[:, NDIM] - 1.0        # lnprob
+        cols[:, NDIM + 1] = LNPRIOR + cols[:, NDIM] / temp_col   # lnprob
         cols[:, NDIM + 2] = 1.0                        # accepted
-        cols[:, NDIM + 3] = temp
+        cols[:, NDIM + 3] = temp_col
         np.savetxt(tmp_path / f"chain_{rung}.txt", cols)
     if with_truth:
         truth = {
@@ -123,9 +132,13 @@ def make_run_dir(tmp_path, with_truth=True, with_summary=True, with_spec=False):
 ERYN_NT, ERYN_NW, ERYN_IT = 2, 3, 5
 
 
-def make_eryn_run_dir(tmp_path):
+def make_eryn_run_dir(tmp_path, adapt_betas=False):
     """Synthetic eryn_chain.h5 mirroring eryn's HDFBackend layout, with an
-    over-allocated tail beyond `iteration` and a beta=0 top rung."""
+    over-allocated tail beyond `iteration` and a beta=0 top rung.
+
+    adapt_betas drifts the middle of the ladder step by step, as eryn's
+    adaptive tempering does, while pinning the cold rung at beta=1.
+    """
     import h5py
 
     tmp_path.mkdir(exist_ok=True)
@@ -142,6 +155,8 @@ def make_eryn_run_dir(tmp_path):
     log_prior[:ERYN_IT] = -1.0
     betas = np.zeros((alloc, ERYN_NT))
     betas[:ERYN_IT] = [1.0, 0.0]             # cold rung + T=inf top rung
+    if adapt_betas:
+        betas[:ERYN_IT, 1] = np.linspace(0.2, 0.5, ERYN_IT)
     accepted = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 0.0]])
 
     with h5py.File(tmp_path / "eryn_chain.h5", "w") as f:

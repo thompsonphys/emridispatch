@@ -10,7 +10,7 @@ import pytest
 pytest.importorskip("h5py")
 
 from conftest import (
-    ERYN_IT, ERYN_NW, ERYN_NT, NSTEPS, TEMPS, TRUTH,
+    ERYN_IT, ERYN_NW, ERYN_NT, LNPRIOR, NSTEPS, TEMPS, TRUTH,
     make_eryn_run_dir, make_eryn_untempered_run_dir, make_run_dir)
 from emridispatch.parameters import NDIM, PARAM_NAMES
 from emridispatch.priors import (
@@ -47,8 +47,11 @@ def test_convert_eryn_shapes_and_flattening(tmp_path):
         for wkr in range(ERYN_NW):
             assert np.isclose(res.samples[0, step * ERYN_NW + wkr, 0],
                               step + 0.1 * wkr)
-    # lnprob = log_like + log_prior; log_prior was -1 everywhere.
-    assert np.allclose(res.lnprob, res.lnlike - 1.0)
+    # lnprob is tempered: lnprior + beta*lnlike, with lnprior = -1 everywhere
+    # and betas [1.0, 0.0], so the beta=0 top rung keeps only the prior.
+    assert np.allclose(res.lnprior, -1.0)
+    assert np.allclose(res.lnprob[0], res.lnlike[0] - 1.0)
+    assert np.allclose(res.lnprob[1], -1.0)
     # Temperatures from the last betas row; beta=0 -> inf.
     assert np.isclose(res.temperatures[0], 1.0)
     assert np.isinf(res.temperatures[1])
@@ -254,11 +257,97 @@ def test_roundtrip_preserves_nwalkers(tmp_path):
     assert np.allclose(back.rung(0, burn=2), res.rung(0, burn=2))
 
 
-def test_load_rejects_older_format_with_postprocess_hint(tmp_path):
+def test_impulse_lnprob_is_tempered_and_lnprior_recovered(tmp_path):
+    """impulse writes lnprior + lnlike/temp; the schema keeps that convention.
+
+    The fixture uses a known constant lnprior, so a rung whose temperature is
+    not 1 pins down that the tempering term was handled rather than assumed
+    away.
+    """
+    res = convert(make_run_dir(tmp_path))
+    assert np.allclose(res.lnprior, LNPRIOR)
+    for r, temp in enumerate(TEMPS):
+        assert np.allclose(res.lnprob[r], LNPRIOR + res.lnlike[r] / temp)
+    # Rung 1 is tempered, so the untempered posterior must differ from lnprob.
+    assert not np.allclose(res.lnprob[1], res.lnprior[1] + res.lnlike[1])
+    # Rung 0 is beta = 1, where the two definitions coincide.
+    assert np.allclose(res.lnprob[0], res.lnprior[0] + res.lnlike[0])
+
+
+def test_eryn_lnprob_uses_per_step_betas(tmp_path):
+    """Under adaptive tempering one ladder vector is wrong for every step but
+    the last, so the tempered lnprob must use the step's own beta."""
+    run = make_eryn_run_dir(tmp_path, adapt_betas=True)
+    res = convert(run)
+    beta_draws = res.betas_per_draw()
+    assert np.allclose(res.lnprob, res.lnprior + beta_draws * res.lnlike)
+    # A single-vector approximation would disagree on the earlier steps.
+    assert not np.allclose(res.lnprob, res.lnprior + res.betas[-1][:, None] * res.lnlike)
+
+
+def test_betas_history_is_stored_per_step(tmp_path):
+    res = convert(make_eryn_run_dir(tmp_path))
+    assert res.betas.shape == (ERYN_IT, ERYN_NT)
+    assert np.allclose(res.betas[:, 0], 1.0)
+    assert np.allclose(res.betas[:, 1], 0.0)
+    assert not res.ladder_adapted
+
+
+def test_untempered_run_gets_unit_betas(tmp_path):
+    # The all-zero beta fallback must reach lnprob, not just the temperature
+    # label: otherwise the cold chain's posterior loses its likelihood term.
+    res = convert(make_eryn_untempered_run_dir(tmp_path))
+    assert np.allclose(res.betas, 1.0)
+    assert np.allclose(res.lnprob, res.lnprior + res.lnlike)
+    assert not res.ladder_adapted
+
+
+def test_ladder_adapted_detected_and_warned(tmp_path, caplog):
+    with caplog.at_level("WARNING"):
+        res = convert(make_eryn_run_dir(tmp_path, adapt_betas=True))
+    assert res.ladder_adapted
+    assert "temperature ladder adapted" in caplog.text
+    # temperatures is the final ladder; the history spans more than that.
+    hist = res.rung_temperatures(1)
+    assert np.isclose(hist[-1], res.temperatures[1])
+    assert hist.min() < hist.max()
+
+
+def test_impulse_ladder_adaptation_also_detected(tmp_path):
+    drifting = [np.full(NSTEPS, t) for t in TEMPS]
+    drifting[1] = np.linspace(2.0, 3.0, NSTEPS)
+    res = convert(make_run_dir(tmp_path, temps=drifting))
+    assert res.ladder_adapted
+    assert np.isclose(res.temperatures[1], 3.0)
+    # lnprior recovery must still track the moving beta step by step.
+    assert np.allclose(res.lnprior, LNPRIOR)
+
+
+def test_betas_per_draw_matches_step_major_layout(tmp_path):
+    res = convert(make_eryn_run_dir(tmp_path, adapt_betas=True))
+    bd = res.betas_per_draw()
+    assert bd.shape == (ERYN_NT, ERYN_IT * ERYN_NW)
+    for step in range(ERYN_IT):
+        block = bd[:, step * ERYN_NW:(step + 1) * ERYN_NW]
+        assert np.allclose(block, res.betas[step][:, None])
+
+
+def test_roundtrip_preserves_lnprior_and_betas(tmp_path):
+    res = convert(make_eryn_run_dir(tmp_path, adapt_betas=True))
+    path = tmp_path / "results.h5"
+    res.save(path)
+    back = Results.load(path)
+    assert np.allclose(back.lnprior, res.lnprior)
+    assert np.allclose(back.lnprob, res.lnprob)
+    assert np.allclose(back.betas, res.betas)
+    assert back.ladder_adapted
+
+
+def test_load_rejects_other_format_with_postprocess_hint(tmp_path):
     import h5py
 
     path = tmp_path / "old.h5"
     with h5py.File(path, "w") as f:
-        f.attrs["format_version"] = 1
+        f.attrs["format_version"] = 0
     with pytest.raises(ValueError, match="emridisp-postprocess"):
         Results.load(path)

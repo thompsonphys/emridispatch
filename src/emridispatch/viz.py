@@ -67,7 +67,7 @@ def plot_corner(samples, labels, truth=None, out_path="corner.png"):
 def plot_marginals(rung_data, labels, truth=None, out_path="marginals.png"):
     """Grid of 1-D marginals; one histogram per rung, colored by temperature.
 
-    rung_data: list of (temperature, samples[N, ndim]) tuples, cold first.
+    rung_data: list of (legend_label, samples[N, ndim]) tuples, cold first.
     """
     plt, _corner = _require_plotting()
     ndim = rung_data[0][1].shape[1]
@@ -81,10 +81,10 @@ def plot_marginals(rung_data, labels, truth=None, out_path="marginals.png"):
     nrungs = len(rung_data)
     for j in range(ndim):
         ax = axes[j]
-        for k, (temp, samples) in enumerate(rung_data):
+        for k, (label, samples) in enumerate(rung_data):
             color = cmap(k / max(nrungs - 1, 1)) if nrungs > 1 else "C0"
             ax.hist(samples[:, j], bins=50, density=True, histtype="step",
-                    color=color, label=f"$T$ = {temp:g}")
+                    color=color, label=label)
         if truth is not None:
             ax.axvline(truth[j], color="k", ls="--", lw=1)
         ax.set_xlabel(labels[j])
@@ -100,6 +100,21 @@ def plot_marginals(rung_data, labels, truth=None, out_path="marginals.png"):
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     return out_path
+
+
+def rung_legend(results, i):
+    """Legend text for one rung: a temperature, or a range if the ladder moved.
+
+    Labelling an adapted rung by a single number would misreport every step but
+    the last, so the spanned range is shown instead.
+    """
+    if not results.ladder_adapted:
+        return f"$T$ = {float(results.temperatures[i]):g}"
+    hist = results.rung_temperatures(i)
+    lo, hi = float(np.min(hist)), float(np.max(hist))
+    if np.isclose(lo, hi):
+        return f"$T$ = {lo:g}"
+    return f"$T$ = {lo:.3g}\N{EN DASH}{hi:.3g}"
 
 
 def make_plots(results, temps=(0,), all_temps=False, burn=0, physical=True,
@@ -121,7 +136,7 @@ def make_plots(results, temps=(0,), all_temps=False, burn=0, physical=True,
     labels = _labels(results)
     truth = results.truth_physical if physical else results.truth_sampling
     rung_data = [
-        (float(results.temperatures[r]),
+        (rung_legend(results, r),
          results.rung(r, physical=physical, burn=burn, thin=thin))
         for r in rungs
     ]

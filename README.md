@@ -138,6 +138,19 @@ the file, which keeps the `(nsteps, nwalkers)` split recoverable: `--burn` and
 autocorrelation. `Results.ndraws` is the stored row count and `Results.nsteps`
 the step count; they coincide for non-ensemble backends.
 
+`lnprob` is the **tempered** log posterior `lnprior + beta*lnlike` — the density
+each rung actually samples — with `lnprior` stored separately so the untempered
+value is `lnprior + lnlike`. The two coincide on the cold rung, where
+`beta = 1`. Because both backends can adapt their ladder mid-run
+(`sampler.eryn.adaptive_temps`, `sampler.impulse.ladder.adapt`), the full
+`(nsteps, ntemps)` beta history is stored and `temperatures` records only the
+final ladder. `Results.ladder_adapted` flags a ladder that moved, conversion
+warns about it, and `emridisp-plot` then legends hot rungs with the temperature
+range they spanned instead of a single misleading number. An adapted ladder also
+invalidates thermodynamic evidence estimates; freeze it
+(`stop_adaptation` / `ladder.adapt: false`) if you need either. The cold rung is
+always safe, since `beta = 1` is pinned.
+
 ## Architecture
 
 ```

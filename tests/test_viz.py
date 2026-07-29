@@ -17,15 +17,24 @@ from emridispatch.viz import main as plot_main
 NSTEPS = 150
 
 
-def make_results(with_truth=True):
+TEMPS = np.array([1.0, 2.5])
+
+
+def make_results(with_truth=True, betas=None):
     rng = np.random.default_rng(0)
     samples = rng.standard_normal((2, NSTEPS, NDIM))
+    lnlike = rng.random((2, NSTEPS))
+    lnprior = -np.ones((2, NSTEPS))
+    if betas is None:
+        betas = np.tile(1.0 / TEMPS, (NSTEPS, 1))
     return Results(
         samples=samples,
-        lnlike=rng.random((2, NSTEPS)),
-        lnprob=rng.random((2, NSTEPS)),
+        lnlike=lnlike,
+        lnprior=lnprior,
+        lnprob=lnprior + betas.T * lnlike,
         accepted=np.ones((2, NSTEPS)),
-        temperatures=np.array([1.0, 2.5]),
+        betas=betas,
+        temperatures=1.0 / betas[-1],
         param_names=list(PARAM_NAMES),
         physical=samples + 1.0,
         truth_physical=np.ones(NDIM) if with_truth else None,
@@ -40,6 +49,22 @@ def test_make_plots_default(tmp_path):
     assert names == ["corner.png", "marginals.png"]
     for p in written:
         assert (tmp_path / p.split("/")[-1]).stat().st_size > 0
+
+
+def test_rung_legend_reports_a_range_when_the_ladder_moved():
+    from emridispatch.viz import rung_legend
+
+    fixed = make_results()
+    assert rung_legend(fixed, 0) == "$T$ = 1"
+    assert rung_legend(fixed, 1) == "$T$ = 2.5"
+
+    drifting = np.tile(1.0 / TEMPS, (NSTEPS, 1))
+    drifting[:, 1] = np.linspace(1 / 2.0, 1 / 4.0, NSTEPS)
+    adapted = make_results(betas=drifting)
+    assert adapted.ladder_adapted
+    # The cold rung is pinned at beta=1, so it keeps a single label.
+    assert rung_legend(adapted, 0) == "$T$ = 1"
+    assert rung_legend(adapted, 1) == "$T$ = 2\N{EN DASH}4"
 
 
 def test_make_plots_all_temps(tmp_path):

@@ -1,8 +1,22 @@
 """Sampler-agnostic results: raw backend output -> common HDF5 format.
 
 Converts a backend outdir (impulse chain_N.txt; eryn eryn_chain.h5)
-into one format_version 2 results.h5. Requires h5py
+into one format_version 1 results.h5. Requires h5py
 (pip install emridispatch[results]).
+
+lnprob is the tempered log posterior, lnprior + beta*lnlike, the density each
+rung actually samples. That is impulse's native convention; eryn stores an
+untempered log prior, so the converter rebuilds the tempered value from the
+per-step betas. lnprior is stored alongside it, so the untempered log posterior
+is lnprior + lnlike for either backend. Rung 0 has beta = 1, making the two
+coincide there.
+
+Both backends can adapt their ladder mid-run, so betas is a full
+(nsteps, ntemps) history rather than one vector; temperatures holds only the
+final ladder. When the ladder moved, a hot rung's samples are a ladder slot of
+drifting temperature rather than a fixed-temperature chain, and thermodynamic
+evidence estimates are invalid. Results.ladder_adapted reports this. The cold
+rung is always safe because beta = 1 is pinned.
 
 Chain axis 1 holds ndraws = nsteps * nwalkers rows, step-major, pooling an
 ensemble backend's walkers into one sample set. nwalkers is stored so the
@@ -14,10 +28,12 @@ ndraws == nsteps.
 Schema; root attrs format_version, backend, ndim, ntemps, nwalkers, nsteps,
 ndraws, param_names (json), config (json):
     /chains/samples    (ntemps, ndraws, ndim)  raw sampling coords
-    /chains/lnlike     (ntemps, ndraws)
-    /chains/lnprob     (ntemps, ndraws)
+    /chains/lnlike     (ntemps, ndraws)        untempered
+    /chains/lnprior    (ntemps, ndraws)
+    /chains/lnprob     (ntemps, ndraws)        tempered: lnprior + beta*lnlike
     /chains/accepted   (ntemps, ndraws)
-    /temperatures      (ntemps,)               inf allowed (top rung)
+    /betas             (nsteps, ntemps)        ladder history, 0 allowed
+    /temperatures      (ntemps,)               final ladder; inf allowed
     /physical/samples  (ntemps, ndraws, ndim)  whitening inverted
     /truth             sampling_vector, physical_vector; injection json attr
     /meta              config_yaml, run_log, run_summary verbatim
@@ -40,7 +56,7 @@ from emridispatch.parameters import NDIM, PARAM_NAMES
 
 logger = logging.getLogger(__name__)
 
-FORMAT_VERSION = 2
+FORMAT_VERSION = 1
 DEFAULT_NAME = "results.h5"
 
 # Raw impulse chain columns after the ndim parameters.
@@ -63,8 +79,10 @@ class Results:
 
     samples: np.ndarray            # (ntemps, ndraws, ndim) sampling coords
     lnlike: np.ndarray             # (ntemps, ndraws)
+    lnprior: np.ndarray            # (ntemps, ndraws)
     lnprob: np.ndarray             # (ntemps, ndraws)
     accepted: np.ndarray           # (ntemps, ndraws)
+    betas: np.ndarray              # (nsteps, ntemps)
     temperatures: np.ndarray       # (ntemps,)
     nwalkers: int = 1
     param_names: list = field(default_factory=lambda: list(PARAM_NAMES))
@@ -99,6 +117,32 @@ class Results:
     @property
     def ndim(self):
         return self.samples.shape[2]
+
+    @property
+    def ladder_adapted(self):
+        """True when the temperature ladder moved during the run.
+
+        A hot rung is then a ladder slot of drifting temperature rather than a
+        fixed-temperature chain, so `temperatures` labels it only by where the
+        ladder ended up, and thermodynamic evidence estimates are invalid. The
+        cold rung is unaffected: beta = 1 is pinned.
+        """
+        return not np.allclose(self.betas, self.betas[0])
+
+    def betas_per_draw(self):
+        """(ntemps, ndraws) inverse temperatures aligned with the draw axis.
+
+        Broadcasts each step's ladder across that step's walkers, matching the
+        step-major layout of the stored chains.
+        """
+        b = np.repeat(self.betas.T[:, :, None], self.nwalkers, axis=2)
+        return b.reshape(self.ntemps, -1)[:, :self.ndraws]
+
+    def rung_temperatures(self, i):
+        """(nsteps,) temperature history of one rung; inf where beta is 0."""
+        with np.errstate(divide="ignore"):
+            return np.where(self.betas[:, i] > 0.0,
+                            1.0 / self.betas[:, i], np.inf)
 
     def _steps(self, data, i):
         """One rung's rows regrouped as (nsteps, nwalkers, ndim)."""
@@ -161,8 +205,10 @@ class Results:
             g = f.create_group("chains")
             g.create_dataset("samples", data=self.samples)
             g.create_dataset("lnlike", data=self.lnlike)
+            g.create_dataset("lnprior", data=self.lnprior)
             g.create_dataset("lnprob", data=self.lnprob)
             g.create_dataset("accepted", data=self.accepted)
+            f.create_dataset("betas", data=self.betas)
             f.create_dataset("temperatures", data=self.temperatures)
 
             if self.physical is not None:
@@ -211,8 +257,10 @@ class Results:
             kw = dict(
                 samples=f["chains/samples"][()],
                 lnlike=f["chains/lnlike"][()],
+                lnprior=f["chains/lnprior"][()],
                 lnprob=f["chains/lnprob"][()],
                 accepted=f["chains/accepted"][()],
+                betas=f["betas"][()],
                 temperatures=f["temperatures"][()],
                 nwalkers=int(f.attrs["nwalkers"]),
                 param_names=json.loads(f.attrs["param_names"]),
@@ -411,10 +459,40 @@ def _load_sidecars(run_dir, samples):
     )
 
 
+def _reciprocal(x):
+    """Map temperatures to betas or back, tolerating an infinite top rung.
+
+    1/inf is already the wanted beta = 0 and raises nothing; the suppressed
+    warning is for a degenerate T = 0 rung, where beta = inf is still the
+    mathematically right answer.
+    """
+    with np.errstate(divide="ignore"):
+        return 1.0 / np.asarray(x, dtype=float)
+
+
+def _warn_if_ladder_adapted(betas, run_dir):
+    """Flag a ladder that moved mid-run, which mislabels the hot rungs."""
+    if len(betas) > 1 and not np.allclose(betas, betas[0]):
+        logger.warning(
+            "%s: the temperature ladder adapted during the run; "
+            "/temperatures records only the final ladder, so hot-rung samples "
+            "span a range of temperatures and are not a fixed-temperature "
+            "chain. The cold rung (beta = 1) is unaffected. Freeze the ladder "
+            "(eryn stop_adaptation, impulse ladder.adapt: false) if you need "
+            "per-rung temperatures or thermodynamic evidence", run_dir)
+
+
 @register_converter("impulse")
 def _convert_impulse(run_dir):
     """impulse PTSampler raw output: chain_N.txt per rung, cols
-    [params(ndim), lnlike, lnprob, accepted, temperature]."""
+    [params(ndim), lnlike, lnprob, accepted, temperature].
+
+    impulse's lnprob column is already tempered (lnprior + lnlike/temp), which
+    is the schema's convention, so lnprior is recovered by subtracting the
+    tempered likelihood term. The per-step temperature column doubles as the
+    ladder history, which is not constant when sampler.impulse.ladder.adapt
+    is on.
+    """
     paths = glob.glob(os.path.join(run_dir, "chain_*.txt"))
     indexed = []
     for p in paths:
@@ -443,12 +521,17 @@ def _convert_impulse(run_dir):
     lnlike = raw[:, :, NDIM]
     lnprob = raw[:, :, NDIM + 1]
     accepted = raw[:, :, NDIM + 2]
-    temperatures = raw[:, 0, NDIM + 3]
+    temps_hist = raw[:, :, NDIM + 3]
+    betas = _reciprocal(temps_hist).T
+    lnprior = lnprob - betas.T * lnlike
+    temperatures = temps_hist[:, -1]
+    _warn_if_ladder_adapted(betas, run_dir)
 
     return Results(
-        samples=samples, lnlike=lnlike, lnprob=lnprob, accepted=accepted,
-        temperatures=temperatures, param_names=list(PARAM_NAMES),
-        backend="impulse", **_load_sidecars(run_dir, samples),
+        samples=samples, lnlike=lnlike, lnprior=lnprior, lnprob=lnprob,
+        accepted=accepted, betas=betas, temperatures=temperatures,
+        param_names=list(PARAM_NAMES), backend="impulse",
+        **_load_sidecars(run_dir, samples),
     )
 
 
@@ -462,12 +545,16 @@ def _convert_eryn(run_dir):
     boolean); eryn's counter advances once per stored step, so `iteration`
     is the whole denominator regardless of thin_by.
 
-    Temperatures come from the last stored beta row. eryn only writes
-    `betas` when tempering is active (ntemps > 1); untempered runs leave
-    the dataset at its HDF5 fill value of 0, which would otherwise read
-    back as T = inf for the cold chain, so an all-zero row is treated as
-    an unwritten ladder and mapped to T = 1. A genuine Tmax = inf top rung
+    eryn only writes `betas` when tempering is active (ntemps > 1); untempered
+    runs leave the dataset at its HDF5 fill value of 0, which would otherwise
+    read back as T = inf for the cold chain, so an all-zero row is treated as
+    an unwritten ladder and replaced by beta = 1. A genuine Tmax = inf top rung
     keeps its beta = 0 because the rest of its row is non-zero.
+
+    eryn's stored log posterior is untempered, so lnprob is rebuilt as
+    lnprior + beta*lnlike to match the schema. The betas used are per stored
+    step, which matters under adaptive tempering: one ladder vector would be
+    wrong for every step but the last.
     """
     h5py = _require_h5py()
     path = os.path.join(run_dir, "eryn_chain.h5")
@@ -495,23 +582,26 @@ def _convert_eryn(run_dir):
         a = np.moveaxis(a, 1, 0)
         return a.reshape(ntemps, nsteps * nwalkers, *a.shape[3:])
 
+    if not np.any(betas[-1]):
+        logger.info("%s: no stored betas (untempered run); treating the single "
+                    "rung as the beta = 1 posterior", path)
+        betas = np.ones((nsteps, ntemps))
+
     samples = flatten(chain)
     lnlike = flatten(log_like)
-    lnprob = flatten(log_like + log_prior)
+    lnprior = flatten(log_prior)
+    beta_draws = np.repeat(betas.T[:, :, None], nwalkers, axis=2).reshape(
+        ntemps, nsteps * nwalkers)
+    lnprob = lnprior + beta_draws * lnlike
     accepted = np.tile((acc_counts / it)[:, None, :],
                        (1, nsteps, 1)).reshape(ntemps, nsteps * nwalkers)
-    if np.any(betas[-1]):
-        with np.errstate(divide="ignore"):
-            temperatures = np.where(betas[-1] > 0.0, 1.0 / betas[-1], np.inf)
-    else:
-        logger.info("eryn_chain.h5 has no stored betas (untempered run); "
-                    "labelling the single rung T = 1")
-        temperatures = np.ones(ntemps)
+    temperatures = _reciprocal(betas[-1])
+    _warn_if_ladder_adapted(betas, run_dir)
 
     return Results(
-        samples=samples, lnlike=lnlike, lnprob=lnprob, accepted=accepted,
-        temperatures=temperatures, nwalkers=nwalkers,
-        param_names=list(PARAM_NAMES), backend="eryn",
+        samples=samples, lnlike=lnlike, lnprior=lnprior, lnprob=lnprob,
+        accepted=accepted, betas=betas, temperatures=temperatures,
+        nwalkers=nwalkers, param_names=list(PARAM_NAMES), backend="eryn",
         **_load_sidecars(run_dir, samples),
     )
 
