@@ -10,10 +10,26 @@ from emridispatch import pp
 from emridispatch.parameters import NDIM, PARAM_NAMES
 from emridispatch.priors import joint_prior_from_box, joint_prior_from_config
 
-MINS = np.array([13.0, 2.0, -0.5, 8.0, 0.05, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-MAXES = np.array([14.0, 2.6, 0.9, 12.0, 0.5, 2.0, np.pi, 2 * np.pi, np.pi,
-                  2 * np.pi, 2 * np.pi, 2 * np.pi])
-PERIODIC = (7, 9, 10, 11)
+# Built by name, so a row added to the sampling vector gets a usable default
+# rather than an IndexError.
+_BOX = {"ln_m1": (13.0, 14.0), "ln_m2": (2.0, 2.6), "a": (-0.5, 0.9),
+        "p": (8.0, 12.0), "e": (0.05, 0.5), "dist": (0.5, 2.0),
+        "q_s": (0.0, np.pi), "q_k": (0.0, np.pi)}
+
+
+def _row(name):
+    return PARAM_NAMES.index(name)
+
+
+def _box():
+    mins, maxes = np.zeros(NDIM), np.full(NDIM, 2 * np.pi)
+    for name, (lo, hi) in _BOX.items():
+        mins[_row(name)], maxes[_row(name)] = lo, hi
+    return mins, maxes
+
+
+MINS, MAXES = _box()
+PERIODIC = tuple(_row(n) for n in ("phi_s", "phi_k", "phi_phi", "phi_r"))
 FIDUCIAL = {"x": 1.0, "phi_theta": 0.0, "mass_1": 1e6, "mass_2": 10.0}
 
 
@@ -69,7 +85,7 @@ def test_draw_truth_keeps_the_fiducial_unsampled_parameters():
 def test_draw_truth_rejects_waveform_invalid_draws():
     """A box straddling the e < 0.75 limit still yields only valid truths."""
     maxes = MAXES.copy()
-    maxes[4] = 1.5
+    maxes[_row("e")] = 1.5
     prior = joint_prior_from_box(MINS, maxes, PERIODIC, names=PARAM_NAMES)
     rng = np.random.default_rng(2)
     for _ in range(200):
@@ -78,26 +94,49 @@ def test_draw_truth_rejects_waveform_invalid_draws():
 
 def test_draw_truth_raises_when_the_box_has_no_valid_point():
     mins, maxes = MINS.copy(), MAXES.copy()
-    mins[4], maxes[4] = 0.9, 0.95          # e entirely above the 0.75 limit
+    mins[_row("e")], maxes[_row("e")] = 0.9, 0.95   # e above the 0.75 limit
     prior = joint_prior_from_box(mins, maxes, PERIODIC, names=PARAM_NAMES)
     with pytest.raises(RuntimeError, match="valid truth"):
         pp.draw_truth(prior, np.random.default_rng(4), FIDUCIAL, max_tries=50)
 
 
-@pytest.mark.parametrize("idx,value,ok", [
-    (2, 1.5, False), (2, 0.5, True),        # a
-    (4, 0.9, False), (4, 0.5, True),        # e
-    (5, 0.0, False), (5, 1.0, True),        # distance
+def _valid_vec(**overrides):
+    vec = np.ones(NDIM)
+    vec[PARAM_NAMES.index("ln_m1")] = 13.5
+    vec[PARAM_NAMES.index("ln_m2")] = 2.3
+    vec[PARAM_NAMES.index("a")] = 0.5
+    vec[PARAM_NAMES.index("p")] = 10.0
+    vec[PARAM_NAMES.index("e")] = 0.1
+    for name, value in overrides.items():
+        vec[PARAM_NAMES.index(name)] = value
+    return vec
+
+
+@pytest.mark.parametrize("name,value,ok", [
+    ("a", 1.5, False), ("a", 0.5, True),
+    ("e", 0.9, False), ("e", 0.5, True),
+    ("dist", 0.0, False), ("dist", 1.0, True),
 ])
-def test_valid_truth_boundaries(idx, value, ok):
-    vec = np.array([13.5, 2.3, 0.5, 10.0, 0.1, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
-    vec[idx] = value
-    assert pp._valid_truth(vec) is ok
+def test_valid_truth_boundaries(name, value, ok):
+    assert pp._valid_truth(_valid_vec(**{name: value})) is ok
 
 
 def test_valid_truth_rejects_below_the_separatrix_floor():
-    vec = np.array([13.5, 2.3, 0.5, 6.1, 0.1, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
-    assert pp._valid_truth(vec) is False
+    assert pp._valid_truth(_valid_vec(p=6.1)) is False
+
+
+@pytest.mark.parametrize("name", ["a", "p", "e", "dist"])
+def test_valid_truth_rejects_nan(name):
+    """The separatrix floor must be written as `p > floor`, not `if p <= floor:
+    reject` -- the latter passes NaN straight through into an injection."""
+    assert pp._valid_truth(_valid_vec(**{name: np.nan})) is False
+
+
+def test_validity_limits_name_real_parameters():
+    """Rows are resolved from PARAM_NAMES, so a renamed or reordered vector
+    must fail here rather than silently checking the wrong rows."""
+    assert set(pp.VALIDITY) <= set(PARAM_NAMES)
+    assert set(pp._VALIDITY_ROWS) == {PARAM_NAMES.index(n) for n in pp.VALIDITY}
 
 
 @pytest.mark.parametrize("shift,expected", [(-50.0, 0.0), (50.0, 1.0)])

@@ -201,9 +201,9 @@ def load_config(path):
             dict(PRIOR_DEFAULTS,
                  periodic_2pi_indices=list(DEFAULT_PERIODIC_2PI_INDICES)),
             raw.get("prior")),
-        priors=dict(raw.get("priors", {})),             # per-parameter overrides
+        priors=dict(raw.get("priors") or {}),           # per-parameter overrides
         reparam=SimpleNamespace(**raw["reparam"]),
         run=SimpleNamespace(**raw["run"]),
         logging=_merge_ns(LOGGING_DEFAULTS, raw.get("logging")),
-        pp=SimpleNamespace(**raw.get("pp", {})),
+        pp=SimpleNamespace(**(raw.get("pp") or {})),
     )

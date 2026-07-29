@@ -4,7 +4,7 @@ import textwrap
 import numpy as np
 import pytest
 
-from emridispatch.config import load_config
+from emridispatch.config import INJECTION_KEYS, load_config
 from emridispatch.parameters import NDIM, PARAM_NAMES
 
 STUB_TABLE = {
@@ -13,24 +13,31 @@ STUB_TABLE = {
     "2nd generation": {"A": "A2", "E": "E2", "T": "T2"},
 }
 
-MINIMAL_TOY_CONFIG = """
-injection:
-  mass_1: 1.0e+6
-  mass_2: 10.0
-  a: 0.0
-  p: 10.0
-  e: 0.1
-  x: 1.0
-  q_k: 1.0
-  phi_k: 1.5707963267948966
-  q_s: 1.0
-  phi_s: 1.5707963267948966
-  luminosity_distance: 1.0
-  phi_phi: 1.5707963267948966
-  phi_theta: 1.5707963267948966
-  phi_r: 1.5707963267948966
+TOY_INJECTION = {
+    "mass_1": 1.0e+6, "mass_2": 10.0, "a": 0.0, "p": 10.0, "e": 0.1, "x": 1.0,
+    "q_k": 1.0, "phi_k": 1.5707963267948966,
+    "q_s": 1.0, "phi_s": 1.5707963267948966,
+    "luminosity_distance": 1.0, "phi_phi": 1.5707963267948966,
+    "phi_theta": 1.5707963267948966, "phi_r": 1.5707963267948966,
+}
 
-data:
+
+def _injection_block():
+    """The injection section for whatever INJECTION_KEYS currently holds.
+
+    A parameter added to the schema gets a placeholder here so the toy fixtures
+    keep working; the shipped configs under examples/ still have to be updated
+    by hand, and test_every_example_config_loads says so.
+    """
+    return "\n".join(f"  {name}: {TOY_INJECTION.get(name, 0.5)!r}"
+                     for name in INJECTION_KEYS)
+
+
+MINIMAL_TOY_CONFIG = f"""
+injection:
+{_injection_block()}
+
+data:""" + """
   response: toy
   duration: 0.3
   delta_t: 10.0

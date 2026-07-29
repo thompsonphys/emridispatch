@@ -33,23 +33,23 @@ from emridispatch.results import is_complete
 logger = logging.getLogger(__name__)
 
 # Waveform-validity limits (FastKerrEccentricEquatorial domain); draws outside
-# are rejected and redrawn. Keys index the 12-D sampling vector.
+# are rejected and redrawn. Keyed by PARAM_NAMES, resolved to rows once.
 VALIDITY = {
-    2: (-0.999, 0.999),   # a
-    4: (0.0, 0.75),       # e
-    5: (1e-3, np.inf),    # dist > 0
+    "a": (-0.999, 0.999),
+    "e": (0.0, 0.75),
+    "dist": (1e-3, np.inf),
 }
 P_SEP_BUFFER = 0.2        # p must clear the separatrix-ish floor: p > 6 + 2e + buffer
 
+_VALIDITY_ROWS = {PARAM_NAMES.index(name): lim for name, lim in VALIDITY.items()}
+_E_ROW, _P_ROW = PARAM_NAMES.index("e"), PARAM_NAMES.index("p")
+
 
 def _valid_truth(vec):
-    for idx, (lo, hi) in VALIDITY.items():
+    for idx, (lo, hi) in _VALIDITY_ROWS.items():
         if not (lo <= vec[idx] <= hi):
             return False
-    e = vec[4]
-    if vec[3] <= 6.0 + 2.0 * e + P_SEP_BUFFER:
-        return False
-    return True
+    return bool(vec[_P_ROW] > 6.0 + 2.0 * vec[_E_ROW] + P_SEP_BUFFER)
 
 
 def draw_truth(prior, rng, fiducial_inj, max_tries=1000):
@@ -59,9 +59,9 @@ def draw_truth(prior, rng, fiducial_inj, max_tries=1000):
     this must be the JointPrior the pipeline builds -- box plus any config
     `priors:` overrides -- not a uniform draw over the box.
 
-    Masses are drawn in ln-space then exponentiated; x/phi_theta stay fixed
-    at the fiducial (not sampled). Invalid draws (outside waveform validity)
-    are rejected and redrawn.
+    Masses are drawn in ln-space then exponentiated; injection keys the
+    sampling vector does not carry stay at the fiducial. Invalid draws (outside
+    waveform validity) are rejected and redrawn.
     """
     for tries in range(max_tries):
         vec = prior.sample(rng)

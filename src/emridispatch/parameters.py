@@ -1,8 +1,8 @@
 """Shared parameter-space definitions for the 12-D EMRI sampling vector.
 
-Sampling vector (masses in log): [ln m1, ln m2, a, p, e, dist, q_s,
-phi_s, q_k, phi_k, phi_phi, phi_r]. x and phi_theta are not sampled
-(equatorial model -> Fisher-singular).
+PARAM_NAMES is the sampling vector (masses in log) and VECTOR_TO_PHYSICAL maps
+its rows to injection-dict keys. Injection keys absent from that mapping are not
+sampled (the equatorial model leaves them Fisher-singular).
 """
 
 import numpy as np
@@ -20,7 +20,7 @@ PARAM_LABELS = [
     r"$\Phi_\varphi$", r"$\Phi_r$",
 ]
 
-# Sampling-vector row -> injection-dict key; rows 0/1 hold the log of theirs.
+# Sampling-vector row -> injection-dict key; LOG_ROWS hold the log of theirs.
 VECTOR_TO_PHYSICAL = {
     "ln_m1": "mass_1", "ln_m2": "mass_2", "a": "a", "p": "p", "e": "e",
     "dist": "luminosity_distance", "q_s": "q_s", "phi_s": "phi_s",
@@ -29,8 +29,11 @@ VECTOR_TO_PHYSICAL = {
 
 # Fisher covariance / prior-box intrinsic parameter order (injection-dict keys).
 INTRINSIC_ORDER = ["mass_1", "mass_2", "a", "p", "e", "luminosity_distance"]
-# Sampled in log space (rows 0/1 of the sampling vector).
+# Sampled in log space. bounds.py and reparam.py additionally require these to
+# be rows 0/1; truth_vector and physical_from_vector do not.
 LOG_PARAMS = ("mass_1", "mass_2")
+LOG_ROWS = tuple(i for i, name in enumerate(PARAM_NAMES)
+                 if VECTOR_TO_PHYSICAL[name] in LOG_PARAMS)
 
 # Full physical ranges for the six angle/phase rows (sampling-vector rows 6..11).
 TWO_PI = 2.0 * np.pi
@@ -47,26 +50,23 @@ ANGLE_RANGES = [
 DEFAULT_PERIODIC_2PI_INDICES = [7, 9, 10, 11]
 
 
-def mass1_mass2_from_log_masses(log_mass_1, log_mass_2):
-    return np.exp(log_mass_1), np.exp(log_mass_2)
-
-
 def truth_vector(inj):
     """The 12-D sampling vector at the injection (masses in log)."""
     vec = np.array([float(inj[VECTOR_TO_PHYSICAL[name]]) for name in PARAM_NAMES])
-    vec[0], vec[1] = np.log(vec[0]), np.log(vec[1])
+    vec[list(LOG_ROWS)] = np.log(vec[list(LOG_ROWS)])
     return vec
 
 
 def physical_from_vector(vec, fiducial):
-    """Injection dict for a 12-D sampling vector, over a fiducial dict.
+    """Injection dict for a 12-D sampling vector.
 
-    Inverse of truth_vector; both read VECTOR_TO_PHYSICAL. Parameters the
-    vector does not carry (x, phi_theta) keep their fiducial values.
+    Inverse of truth_vector; both read VECTOR_TO_PHYSICAL. Injection keys the
+    vector does not carry keep their fiducial values, which load_config has
+    already coerced to float.
     """
     out = dict(fiducial)
     for i, name in enumerate(PARAM_NAMES):
         out[VECTOR_TO_PHYSICAL[name]] = float(vec[i])
-    m1, m2 = mass1_mass2_from_log_masses(out["mass_1"], out["mass_2"])
-    out["mass_1"], out["mass_2"] = float(m1), float(m2)
+    for key in LOG_PARAMS:
+        out[key] = float(np.exp(out[key]))
     return out

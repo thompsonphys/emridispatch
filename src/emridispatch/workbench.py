@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from emridispatch.parameters import (
-    NDIM, PARAM_NAMES, physical_from_vector, truth_vector)
+    NDIM, PARAM_NAMES, VECTOR_TO_PHYSICAL, physical_from_vector, truth_vector)
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ __all__ = ["load", "truth", "to_vector", "to_physical", "offset", "signal", "lnl
            "SNR", "snr", "overlap", "Measurement", "measure", "injection_template", "noise",
            "prior_from_config"]
 
-_UNSAMPLED = ("x", "phi_theta")
+_SAMPLED = frozenset(VECTOR_TO_PHYSICAL.values())
 
 
 def truth(model):
@@ -41,11 +41,12 @@ def to_vector(params):
 def to_physical(model, vector):
     """Physical-parameter dict for a 12-D sampling vector.
 
-    x and phi_theta are copied from model.injection_parameters: the
-    equatorial waveform never samples them.
+    Injection keys the vector does not carry are copied from
+    model.injection_parameters: the equatorial waveform never samples them.
     """
-    fiducial = {name: float(model.injection_parameters[name])
-                for name in _UNSAMPLED}
+    fiducial = {name: float(val)
+                for name, val in model.injection_parameters.items()
+                if name not in _SAMPLED}
     return physical_from_vector(to_vector(vector), fiducial)
 
 

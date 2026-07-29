@@ -453,22 +453,6 @@ class LisatoolsEMRILikelihood(EMRIInjectionGenerator, InjectionModel):
     def __init__(self, injection_parameters, vectorized=False, **kwargs):
         super().__init__(injection_parameters, **kwargs)
         self.vectorized = vectorized
-        self.default_parameters = {
-            "mass_1": 1e6,
-            "mass_2": 10.0,
-            "a": 0.0,
-            "p": 10.0,
-            "e": 0.1,
-            "x": 1.0,
-            "q_k": 1.0,
-            "phi_k": 0.0,
-            "q_s": 1.0,
-            "phi_s": 0.0,
-            "luminosity_distance": 1.0,
-            "phi_phi": 0.0,
-            "phi_theta": 0.0,
-            "phi_r": 0.0,
-        }
 
     @classmethod
     def from_config(cls, cfg):
@@ -489,8 +473,15 @@ class LisatoolsEMRILikelihood(EMRIInjectionGenerator, InjectionModel):
         )
 
     def __call__(self, params):
+        """ln L for a 12-D sampling vector.
+
+        The template is built over injection_parameters, not a fixed default.
+        The vector overwrites every sampled row; the unsampled ones carry no
+        independent content for the current equatorial models, but a model that
+        does use them must see the injection's values, not hard-coded ones.
+        """
         try:
-            template_params = physical_from_vector(params, self.default_parameters)
+            template_params = physical_from_vector(params, self.injection_parameters)
         except Exception:
             return -np.inf
 

@@ -3,13 +3,17 @@ import pathlib
 import pytest
 import yaml
 
-from emridispatch.config import REQUIRED_SECTIONS, load_config
+from emridispatch.config import INJECTION_KEYS, REQUIRED_SECTIONS, load_config
+
+_INJECTION = {"mass_1": "1.0e6", "mass_2": 10.0, "a": 0.0, "p": 10.0,
+              "e": 0.1, "x": 1.0, "q_k": 1.0, "phi_k": 1.5, "q_s": 1.0,
+              "phi_s": 1.5, "luminosity_distance": 1.0, "phi_phi": 1.5,
+              "phi_theta": 1.5, "phi_r": 1.5}
 
 BASE = {
-    "injection": {"mass_1": "1.0e6", "mass_2": 10.0, "a": 0.0, "p": 10.0,
-                  "e": 0.1, "x": 1.0, "q_k": 1.0, "phi_k": 1.5, "q_s": 1.0,
-                  "phi_s": 1.5, "luminosity_distance": 1.0, "phi_phi": 1.5,
-                  "phi_theta": 1.5, "phi_r": 1.5},
+    # Placeholder for any key added to the schema later, so these tests stay
+    # about config parsing rather than about the parameter list.
+    "injection": {name: _INJECTION.get(name, 0.5) for name in INJECTION_KEYS},
     "data": {"response": "toy", "duration": 0.3, "delta_t": 10.0,
              "inj_snr": 30.0, "channels": ["A", "E"]},
     "sampler": {"nsamples": 100,
@@ -175,6 +179,19 @@ def test_unknown_top_level_section_is_rejected(tmp_path):
     raw["sampeler"] = {"nsamples": 5}
     with pytest.raises(ValueError, match="did you mean 'sampler'"):
         load_config(_write_raw(tmp_path, raw))
+
+
+@pytest.mark.parametrize("section", ["priors", "pp", "logging", "prior", "sampler"])
+def test_optional_section_with_an_empty_body_falls_back_to_defaults(
+        tmp_path, section):
+    # `priors:` with every entry commented out parses as None, not {}.
+    raw = yaml.safe_load(yaml.safe_dump(BASE))
+    raw[section] = None
+    cfg = load_config(_write_raw(tmp_path, raw))
+    assert cfg.priors == {}
+    assert cfg.logging.level == "INFO"
+    assert cfg.sampler.backend == "impulse"
+    assert cfg.prior.box_scale == 3.0
 
 
 def test_empty_config_is_rejected(tmp_path):
