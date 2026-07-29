@@ -38,7 +38,7 @@ def resolve_results_path(arg):
         path = os.path.join(arg, DEFAULT_NAME)
         if not os.path.exists(path):
             raise FileNotFoundError(
-                f"no {DEFAULT_NAME} in {arg}; run `emridispatch-postprocess "
+                f"no {DEFAULT_NAME} in {arg}; run `emridisp-postprocess "
                 f"{arg}` first")
         return path
     if not os.path.exists(arg):
@@ -102,19 +102,26 @@ def plot_marginals(rung_data, labels, truth=None, out_path="marginals.png"):
     return out_path
 
 
+TEMP_FMT = ".3g"
+
+
 def rung_legend(results, i):
     """Legend text for one rung: a temperature, or a range if the ladder moved.
 
-    Labelling an adapted rung by a single number would misreport every step but
-    the last, so the spanned range is shown instead.
+    Labelling a rung whose temperature drifted by a single number would
+    misreport every step but the last, so the spanned range is shown. Both
+    branches share one format spec, and a range whose endpoints round to the
+    same text collapses to a single label rather than rendering as "2-2".
     """
-    if not results.ladder_adapted:
-        return f"$T$ = {float(results.temperatures[i]):g}"
+    end = format(float(results.temperatures[i]), TEMP_FMT)
+    if not results.ladder_adapted():
+        return f"$T$ = {end}"
     hist = results.rung_temperatures(i)
-    lo, hi = float(np.min(hist)), float(np.max(hist))
-    if np.isclose(lo, hi):
-        return f"$T$ = {lo:g}"
-    return f"$T$ = {lo:.3g}\N{EN DASH}{hi:.3g}"
+    lo = format(float(np.min(hist)), TEMP_FMT)
+    hi = format(float(np.max(hist)), TEMP_FMT)
+    if lo == hi:
+        return f"$T$ = {lo}"
+    return f"$T$ = {lo}\N{EN DASH}{hi}"
 
 
 def make_plots(results, temps=(0,), all_temps=False, burn=0, physical=True,
@@ -156,7 +163,7 @@ def make_plots(results, temps=(0,), all_temps=False, burn=0, physical=True,
 def main():
     ap = argparse.ArgumentParser(
         description="Corner + 1D posterior plots from a results.h5 file "
-                    "(produce one with emridispatch-postprocess).")
+                    "(produce one with emridisp-postprocess).")
     ap.add_argument("results",
                     help="results.h5 path, or a directory containing one")
     ap.add_argument("--burn", type=int, default=0,

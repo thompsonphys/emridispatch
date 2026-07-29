@@ -144,7 +144,7 @@ value is `lnprior + lnlike`. The two coincide on the cold rung, where
 `beta = 1`. Because both backends can adapt their ladder mid-run
 (`sampler.eryn.adaptive_temps`, `sampler.impulse.ladder.adapt`), the full
 `(nsteps, ntemps)` beta history is stored and `temperatures` records only the
-final ladder. `Results.ladder_adapted` flags a ladder that moved, conversion
+final ladder. `Results.ladder_adapted()` flags a ladder that moved, conversion
 warns about it, and `emridisp-plot` then legends hot rungs with the temperature
 range they spanned instead of a single misleading number. An adapted ladder also
 invalidates thermodynamic evidence estimates; freeze it

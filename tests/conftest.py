@@ -88,22 +88,29 @@ LNPRIOR = -1.0
 
 
 def make_run_dir(tmp_path, with_truth=True, with_summary=True, with_spec=False,
-                 temps=None):
+                 temps=None, ladder=None, dead_row=None):
     """Fake impulse run dir: chain_N.txt per rung + shared sidecars.
 
     The lnprob column follows impulse's tempered convention,
     lnprior + lnlike/temp, so converters can be checked against a known
     constant lnprior. Pass `temps` as a per-rung (NSTEPS,) array to emulate a
-    ladder that adapted mid-run.
+    ladder that adapted mid-run, `ladder` to override the rung temperatures
+    (build_ladder always ends at np.inf, so pass one to get a beta=0 rung), and
+    `dead_row` to set lnlike = -inf on that row of every rung, as an
+    out-of-domain waveform does.
     """
     tmp_path.mkdir(exist_ok=True)
     rng = np.random.default_rng(0)
-    for rung, temp in enumerate(TEMPS):
+    rung_temps = TEMPS if ladder is None else ladder
+    for rung, temp in enumerate(rung_temps):
         temp_col = np.full(NSTEPS, temp) if temps is None else np.asarray(temps[rung])
         cols = np.empty((NSTEPS, NDIM + 4))
         cols[:, :NDIM] = TRUTH + 0.05 * rng.standard_normal((NSTEPS, NDIM))
         cols[:, NDIM] = -0.5 * rng.random(NSTEPS)      # lnlike
-        cols[:, NDIM + 1] = LNPRIOR + cols[:, NDIM] / temp_col   # lnprob
+        if dead_row is not None:
+            cols[dead_row, NDIM] = -np.inf
+        with np.errstate(invalid="ignore", divide="ignore"):
+            cols[:, NDIM + 1] = LNPRIOR + cols[:, NDIM] / temp_col   # lnprob
         cols[:, NDIM + 2] = 1.0                        # accepted
         cols[:, NDIM + 3] = temp_col
         np.savetxt(tmp_path / f"chain_{rung}.txt", cols)
@@ -132,12 +139,14 @@ def make_run_dir(tmp_path, with_truth=True, with_summary=True, with_spec=False,
 ERYN_NT, ERYN_NW, ERYN_IT = 2, 3, 5
 
 
-def make_eryn_run_dir(tmp_path, adapt_betas=False):
+def make_eryn_run_dir(tmp_path, adapt_betas=False, dead_row=None):
     """Synthetic eryn_chain.h5 mirroring eryn's HDFBackend layout, with an
     over-allocated tail beyond `iteration` and a beta=0 top rung.
 
     adapt_betas drifts the middle of the ladder step by step, as eryn's
-    adaptive tempering does, while pinning the cold rung at beta=1.
+    adaptive tempering does, while pinning the cold rung at beta=1. dead_row
+    sets log_like = -inf on that step of every rung, as an out-of-domain
+    waveform does.
     """
     import h5py
 
@@ -157,6 +166,8 @@ def make_eryn_run_dir(tmp_path, adapt_betas=False):
     betas[:ERYN_IT] = [1.0, 0.0]             # cold rung + T=inf top rung
     if adapt_betas:
         betas[:ERYN_IT, 1] = np.linspace(0.2, 0.5, ERYN_IT)
+    if dead_row is not None:
+        log_like[dead_row] = -np.inf
     accepted = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 0.0]])
 
     with h5py.File(tmp_path / "eryn_chain.h5", "w") as f:

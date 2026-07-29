@@ -243,8 +243,22 @@ def test_rung_thin_drops_whole_steps_not_walkers(tmp_path):
 
 def test_rung_burn_guard_reports_steps(tmp_path):
     res = convert(make_eryn_run_dir(tmp_path))
-    with pytest.raises(ValueError, match=f"this run has {ERYN_IT} steps"):
+    with pytest.raises(ValueError, match=f"run's {ERYN_IT} time step"):
         res.rung(0, burn=ERYN_IT)
+
+
+def test_rung_guard_counts_steps_not_rows_when_thinning(tmp_path):
+    """One surviving step is nwalkers rows, which cleared a row-count guard.
+
+    Those rows are the same step of a coupled ensemble, so returning them as a
+    posterior would hand corner.corner a set with no independent draws at all.
+    """
+    res = convert(make_eryn_run_dir(tmp_path))
+    assert res.ndraws == ERYN_IT * ERYN_NW
+    with pytest.raises(ValueError, match="reduce --burn or --thin"):
+        res.rung(0, thin=1000)
+    # Two steps is the smallest request that is not degenerate.
+    assert len(res.rung(0, thin=ERYN_IT // 2)) >= 2 * ERYN_NW
 
 
 def test_roundtrip_preserves_nwalkers(tmp_path):
@@ -274,6 +288,69 @@ def test_impulse_lnprob_is_tempered_and_lnprior_recovered(tmp_path):
     assert np.allclose(res.lnprob[0], res.lnprior[0] + res.lnlike[0])
 
 
+def test_impulse_inf_rung_lnprior_passes_through(tmp_path):
+    """build_ladder always ends at np.inf, so beta = 0 on the top rung always.
+
+    At beta = 0 the tempered posterior is the prior, so lnprior is lnprob
+    verbatim and no likelihood term is evaluated. Where a -inf likelihood makes
+    impulse's own lnprob column NaN (it computes lnprior + lnlike/temp, the same
+    0*-inf), nothing is recoverable and the NaN is inherited, not manufactured.
+    """
+    run = make_run_dir(tmp_path, ladder=[1.0, 25.0, np.inf], dead_row=3)
+    res = convert(run)
+    assert res.betas[-1, 2] == 0.0
+    assert np.isneginf(res.lnlike[2, 3])
+    assert np.array_equal(res.lnprior[2], res.lnprob[2], equal_nan=True)
+    # Live rows keep the known constant prior on every rung, inf rung included.
+    live = np.arange(NSTEPS) != 3
+    for r in range(3):
+        assert np.allclose(res.lnprior[r][live], LNPRIOR)
+
+
+def test_impulse_unrecoverable_lnprior_is_counted_not_silent(tmp_path, caplog):
+    """beta > 0 with lnlike = -inf gives lnprob = -inf, which carries no
+    information about lnprior. NaN is the right value; silence is not."""
+    with caplog.at_level("WARNING"):
+        res = convert(make_run_dir(tmp_path, ladder=[1.0, 25.0], dead_row=3))
+    assert np.isnan(res.lnprior[0, 3])
+    assert "carries no information about lnprior" in caplog.text
+    live = np.arange(NSTEPS) != 3
+    assert np.allclose(res.lnprior[0][live], LNPRIOR)
+
+
+def test_impulse_upstream_nan_lnprob_is_reported(tmp_path, caplog):
+    """A NaN already in the lnprob column is upstream data loss, not a
+    converter artefact, so it gets its own message."""
+    with caplog.at_level("WARNING"):
+        convert(make_run_dir(tmp_path, ladder=[1.0, np.inf], dead_row=3))
+    assert "already NaN in the raw chain" in caplog.text
+
+
+def test_eryn_beta_zero_rung_survives_infinite_likelihood(tmp_path):
+    """Same 0*-inf hazard in the forward direction: at beta = 0 the tempered
+    lnprob is exactly lnprior, so it must stay finite."""
+    res = convert(make_eryn_run_dir(tmp_path, dead_row=2))
+    assert res.betas[-1, 1] == 0.0
+    dead = slice(2 * ERYN_NW, 3 * ERYN_NW)
+    assert np.all(np.isneginf(res.lnlike[1, dead]))
+    assert np.all(np.isfinite(res.lnprob[1]))
+    assert np.allclose(res.lnprob[1], res.lnprior[1])
+    # The cold rung has beta = 1, so -inf likelihood legitimately gives -inf.
+    assert np.all(np.isneginf(res.lnprob[0, dead]))
+
+
+def test_temperature_ladder_rejects_non_positive_entries(tmp_path):
+    with pytest.raises(ValueError, match="must be > 0"):
+        convert(make_run_dir(tmp_path, ladder=[1.0, 0.0]))
+
+
+def test_negative_beta_is_not_folded_into_infinity(tmp_path):
+    res = convert(make_eryn_run_dir(tmp_path))
+    res.betas = np.full((ERYN_IT, ERYN_NT), -0.25)
+    # A corrupt ladder must stay visible rather than reading as T = inf.
+    assert np.allclose(res.rung_temperatures(1), -4.0)
+
+
 def test_eryn_lnprob_uses_per_step_betas(tmp_path):
     """Under adaptive tempering one ladder vector is wrong for every step but
     the last, so the tempered lnprob must use the step's own beta."""
@@ -290,7 +367,7 @@ def test_betas_history_is_stored_per_step(tmp_path):
     assert res.betas.shape == (ERYN_IT, ERYN_NT)
     assert np.allclose(res.betas[:, 0], 1.0)
     assert np.allclose(res.betas[:, 1], 0.0)
-    assert not res.ladder_adapted
+    assert not res.ladder_adapted()
 
 
 def test_untempered_run_gets_unit_betas(tmp_path):
@@ -299,13 +376,13 @@ def test_untempered_run_gets_unit_betas(tmp_path):
     res = convert(make_eryn_untempered_run_dir(tmp_path))
     assert np.allclose(res.betas, 1.0)
     assert np.allclose(res.lnprob, res.lnprior + res.lnlike)
-    assert not res.ladder_adapted
+    assert not res.ladder_adapted()
 
 
 def test_ladder_adapted_detected_and_warned(tmp_path, caplog):
     with caplog.at_level("WARNING"):
         res = convert(make_eryn_run_dir(tmp_path, adapt_betas=True))
-    assert res.ladder_adapted
+    assert res.ladder_adapted()
     assert "temperature ladder adapted" in caplog.text
     # temperatures is the final ladder; the history spans more than that.
     hist = res.rung_temperatures(1)
@@ -317,7 +394,7 @@ def test_impulse_ladder_adaptation_also_detected(tmp_path):
     drifting = [np.full(NSTEPS, t) for t in TEMPS]
     drifting[1] = np.linspace(2.0, 3.0, NSTEPS)
     res = convert(make_run_dir(tmp_path, temps=drifting))
-    assert res.ladder_adapted
+    assert res.ladder_adapted()
     assert np.isclose(res.temperatures[1], 3.0)
     # lnprior recovery must still track the moving beta step by step.
     assert np.allclose(res.lnprior, LNPRIOR)
@@ -340,7 +417,7 @@ def test_roundtrip_preserves_lnprior_and_betas(tmp_path):
     assert np.allclose(back.lnprior, res.lnprior)
     assert np.allclose(back.lnprob, res.lnprob)
     assert np.allclose(back.betas, res.betas)
-    assert back.ladder_adapted
+    assert back.ladder_adapted()
 
 
 def test_load_rejects_other_format_with_postprocess_hint(tmp_path):

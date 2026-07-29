@@ -61,7 +61,7 @@ def test_rung_legend_reports_a_range_when_the_ladder_moved():
     drifting = np.tile(1.0 / TEMPS, (NSTEPS, 1))
     drifting[:, 1] = np.linspace(1 / 2.0, 1 / 4.0, NSTEPS)
     adapted = make_results(betas=drifting)
-    assert adapted.ladder_adapted
+    assert adapted.ladder_adapted()
     # The cold rung is pinned at beta=1, so it keeps a single label.
     assert rung_legend(adapted, 0) == "$T$ = 1"
     assert rung_legend(adapted, 1) == "$T$ = 2\N{EN DASH}4"
@@ -95,7 +95,7 @@ def test_resolve_results_path(tmp_path):
     assert resolve_results_path(str(h5)) == str(h5)
     empty = tmp_path / "empty"
     empty.mkdir()
-    with pytest.raises(FileNotFoundError, match="emridispatch-postprocess"):
+    with pytest.raises(FileNotFoundError, match="emridisp-postprocess"):
         resolve_results_path(str(empty))
 
 
