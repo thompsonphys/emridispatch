@@ -1,7 +1,9 @@
+import pathlib
+
 import pytest
 import yaml
 
-from emridispatch.config import load_config
+from emridispatch.config import REQUIRED_SECTIONS, load_config
 
 BASE = {
     "injection": {"mass_1": "1.0e6", "mass_2": 10.0, "a": 0.0, "p": 10.0,
@@ -131,3 +133,61 @@ def test_foreground_coercions(tmp_path):
     for raw, want in cases:
         cfg = load_config(write_cfg(tmp_path, data={"foreground": raw}))
         assert cfg.data.foreground is want, raw
+
+
+def _write_raw(tmp_path, raw):
+    path = tmp_path / "cfg.yaml"
+    path.write_text(yaml.safe_dump(raw))
+    return str(path)
+
+
+@pytest.mark.parametrize("section", sorted(REQUIRED_SECTIONS))
+def test_missing_required_section_names_itself(tmp_path, section):
+    raw = yaml.safe_load(yaml.safe_dump(BASE))
+    del raw[section]
+    with pytest.raises(ValueError, match=f"missing config section.*{section}"):
+        load_config(_write_raw(tmp_path, raw))
+
+
+@pytest.mark.parametrize("section", sorted(REQUIRED_SECTIONS))
+def test_empty_required_section_is_treated_as_missing(tmp_path, section):
+    # `reparam:` with nothing under it parses as None, not {}.
+    raw = yaml.safe_load(yaml.safe_dump(BASE))
+    raw[section] = None
+    with pytest.raises(ValueError, match=f"missing config section.*{section}"):
+        load_config(_write_raw(tmp_path, raw))
+
+
+@pytest.mark.parametrize("section,key", [
+    ("reparam", "mode"), ("reparam", "idx"),
+    ("run", "outdir"), ("run", "seed"), ("injection", "phi_theta"),
+])
+def test_missing_required_key_names_itself(tmp_path, section, key):
+    raw = yaml.safe_load(yaml.safe_dump(BASE))
+    del raw[section][key]
+    with pytest.raises(ValueError,
+                       match=f"missing key.*{section}.*{key}"):
+        load_config(_write_raw(tmp_path, raw))
+
+
+def test_unknown_top_level_section_is_rejected(tmp_path):
+    raw = yaml.safe_load(yaml.safe_dump(BASE))
+    raw["sampeler"] = {"nsamples": 5}
+    with pytest.raises(ValueError, match="did you mean 'sampler'"):
+        load_config(_write_raw(tmp_path, raw))
+
+
+def test_empty_config_is_rejected(tmp_path):
+    path = tmp_path / "cfg.yaml"
+    path.write_text("")
+    with pytest.raises(ValueError, match="empty or not a YAML mapping"):
+        load_config(str(path))
+
+
+def test_every_example_config_loads():
+    """The shipped examples must satisfy the required-section checks."""
+    root = pathlib.Path(__file__).resolve().parents[1] / "examples"
+    paths = sorted(root.glob("*.yaml"))
+    assert paths
+    for path in paths:
+        load_config(str(path))

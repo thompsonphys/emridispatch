@@ -20,6 +20,13 @@ PARAM_LABELS = [
     r"$\Phi_\varphi$", r"$\Phi_r$",
 ]
 
+# Sampling-vector row -> injection-dict key; rows 0/1 hold the log of theirs.
+VECTOR_TO_PHYSICAL = {
+    "ln_m1": "mass_1", "ln_m2": "mass_2", "a": "a", "p": "p", "e": "e",
+    "dist": "luminosity_distance", "q_s": "q_s", "phi_s": "phi_s",
+    "q_k": "q_k", "phi_k": "phi_k", "phi_phi": "phi_phi", "phi_r": "phi_r",
+}
+
 # Fisher covariance / prior-box intrinsic parameter order (injection-dict keys).
 INTRINSIC_ORDER = ["mass_1", "mass_2", "a", "p", "e", "luminosity_distance"]
 # Sampled in log space (rows 0/1 of the sampling vector).
@@ -46,8 +53,20 @@ def mass1_mass2_from_log_masses(log_mass_1, log_mass_2):
 
 def truth_vector(inj):
     """The 12-D sampling vector at the injection (masses in log)."""
-    return np.array([
-        np.log(inj["mass_1"]), np.log(inj["mass_2"]),
-        inj["a"], inj["p"], inj["e"], inj["luminosity_distance"],
-        inj["q_s"], inj["phi_s"], inj["q_k"], inj["phi_k"], inj["phi_phi"], inj["phi_r"],
-    ])
+    vec = np.array([float(inj[VECTOR_TO_PHYSICAL[name]]) for name in PARAM_NAMES])
+    vec[0], vec[1] = np.log(vec[0]), np.log(vec[1])
+    return vec
+
+
+def physical_from_vector(vec, fiducial):
+    """Injection dict for a 12-D sampling vector, over a fiducial dict.
+
+    Inverse of truth_vector; both read VECTOR_TO_PHYSICAL. Parameters the
+    vector does not carry (x, phi_theta) keep their fiducial values.
+    """
+    out = dict(fiducial)
+    for i, name in enumerate(PARAM_NAMES):
+        out[VECTOR_TO_PHYSICAL[name]] = float(vec[i])
+    m1, m2 = mass1_mass2_from_log_masses(out["mass_1"], out["mass_2"])
+    out["mass_1"], out["mass_2"] = float(m1), float(m2)
+    return out

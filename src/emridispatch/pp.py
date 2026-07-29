@@ -25,7 +25,9 @@ from emridispatch.bounds import cache_path, build_prior_bounds, save_prior_bound
 from emridispatch.config import load_config
 from emridispatch.diagnostics import load_cold_chain
 from emridispatch.logging_utils import setup_logging
-from emridispatch.parameters import NDIM, PARAM_NAMES, truth_vector
+from emridispatch.parameters import (
+    NDIM, PARAM_NAMES, physical_from_vector, truth_vector)
+from emridispatch.priors import joint_prior_from_config
 from emridispatch.results import is_complete
 
 logger = logging.getLogger(__name__)
@@ -50,29 +52,28 @@ def _valid_truth(vec):
     return True
 
 
-def draw_truth(mins, maxes, rng, fiducial_inj, max_tries=1000):
-    """One injection dict, truth drawn uniformly from the fiducial prior box.
+def draw_truth(prior, rng, fiducial_inj, max_tries=1000):
+    """One injection dict, truth drawn from the prior the run will sample under.
+
+    P-P calibration is only valid when truths come from exactly that prior, so
+    this must be the JointPrior the pipeline builds -- box plus any config
+    `priors:` overrides -- not a uniform draw over the box.
 
     Masses are drawn in ln-space then exponentiated; x/phi_theta stay fixed
     at the fiducial (not sampled). Invalid draws (outside waveform validity)
     are rejected and redrawn.
     """
-    for _ in range(max_tries):
-        vec = rng.uniform(mins, maxes)
+    for tries in range(max_tries):
+        vec = prior.sample(rng)
         if _valid_truth(vec):
             break
     else:
-        raise RuntimeError("could not draw a valid truth inside the prior box")
-    inj = dict(fiducial_inj)
-    inj.update({
-        "mass_1": float(np.exp(vec[0])), "mass_2": float(np.exp(vec[1])),
-        "a": float(vec[2]), "p": float(vec[3]), "e": float(vec[4]),
-        "luminosity_distance": float(vec[5]),
-        "q_s": float(vec[6]), "phi_s": float(vec[7]),
-        "q_k": float(vec[8]), "phi_k": float(vec[9]),
-        "phi_phi": float(vec[10]), "phi_r": float(vec[11]),
-    })
-    return inj
+        raise RuntimeError("could not draw a valid truth from the prior")
+    if tries:
+        logger.warning("truth draw needed %d rejections, biasing the ranks: "
+                       "the prior reaches outside the waveform domain. Narrow "
+                       "it, or lower prior.box_scale.", tries)
+    return physical_from_vector(vec, fiducial_inj)
 
 
 def ensure_reference_cache(cfg, outroot):
@@ -300,7 +301,10 @@ def main():
     else:
         ref_cache = ensure_reference_cache(cfg, outroot)
         box = np.load(ref_cache)
-        mins, maxes = box["mins"], box["maxes"]
+        prior = joint_prior_from_config(cfg, box["mins"], box["maxes"])
+        if cfg.priors:
+            logger.info("drawing truths from the overridden prior: %s",
+                        sorted(cfg.priors))
 
         for i in range(nruns):
             outdir = outdir_for(outroot, i)
@@ -311,7 +315,7 @@ def main():
             # Draw seeded per run index -> the truth list is reproducible and
             # independent of which runs are skipped/resumed.
             rng = np.random.default_rng(draw_seed + i)
-            inj = draw_truth(mins, maxes, rng, cfg.injection)
+            inj = draw_truth(prior, rng, cfg.injection)
             if run_injection(cfg, base_raw, inj, i, outdir, ref_cache, nsamples, args.isolate):
                 done.append(outdir)
 

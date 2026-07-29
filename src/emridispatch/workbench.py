@@ -10,7 +10,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from emridispatch.parameters import NDIM, PARAM_NAMES, truth_vector
+from emridispatch.parameters import (
+    NDIM, PARAM_NAMES, physical_from_vector, truth_vector)
 
 logger = logging.getLogger(__name__)
 
@@ -19,19 +20,6 @@ __all__ = ["load", "truth", "to_vector", "to_physical", "offset", "signal", "lnl
            "prior_from_config"]
 
 _UNSAMPLED = ("x", "phi_theta")
-
-_VECTOR_TO_PHYSICAL = {
-    "a": "a",
-    "p": "p",
-    "e": "e",
-    "dist": "luminosity_distance",
-    "q_s": "q_s",
-    "phi_s": "phi_s",
-    "q_k": "q_k",
-    "phi_k": "phi_k",
-    "phi_phi": "phi_phi",
-    "phi_r": "phi_r",
-}
 
 
 def truth(model):
@@ -56,14 +44,9 @@ def to_physical(model, vector):
     x and phi_theta are copied from model.injection_parameters: the
     equatorial waveform never samples them.
     """
-    vec = to_vector(vector)
-    out = {name: float(model.injection_parameters[name]) for name in _UNSAMPLED}
-    out["mass_1"] = float(np.exp(vec[0]))
-    out["mass_2"] = float(np.exp(vec[1]))
-    for i, name in enumerate(PARAM_NAMES):
-        if name in _VECTOR_TO_PHYSICAL:
-            out[_VECTOR_TO_PHYSICAL[name]] = float(vec[i])
-    return out
+    fiducial = {name: float(model.injection_parameters[name])
+                for name in _UNSAMPLED}
+    return physical_from_vector(to_vector(vector), fiducial)
 
 
 def offset(model, **deltas):

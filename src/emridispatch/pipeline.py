@@ -17,7 +17,7 @@ from emridispatch.bounds import (
     save_prior_bounds)
 from emridispatch.fisher import get_fisher_provider
 from emridispatch.parameters import NDIM, PARAM_NAMES, truth_vector
-from emridispatch.priors import joint_prior_from_box
+from emridispatch.priors import joint_prior_from_config
 from emridispatch.response import build_injection_model
 from emridispatch.starts import initial_point
 
@@ -169,8 +169,7 @@ def build_problem(cfg, resume=True):
 
     # Structured joint prior: Uniform/PeriodicUniform box by default, then
     # per-parameter overrides from the config `priors:` section.
-    prior = joint_prior_from_box(mins, maxes, cfg.prior.periodic_2pi_indices,
-                                 names=PARAM_NAMES, overrides=cfg.priors)
+    prior = joint_prior_from_config(cfg, mins, maxes)
     if cfg.priors:
         logger.info("priors: overrides applied for %s", sorted(cfg.priors))
 

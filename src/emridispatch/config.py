@@ -94,6 +94,19 @@ RUN_KEYS = ("outdir", "seed")
 LOGGING_DEFAULTS = {"level": "INFO", "file": "run.log"}
 PP_KEYS = ("nruns", "outroot", "draw_seed", "nsamples", "burn_frac")
 
+# Sections with no defaults to fall back on, and the keys within them that are
+# dereferenced unconditionally.
+REQUIRED_SECTIONS = {
+    "injection": INJECTION_KEYS,
+    "data": (),
+    "reparam": REPARAM_KEYS,
+    "run": RUN_KEYS,
+}
+TOP_LEVEL_SECTIONS = (
+    "injection", "data", "sampler", "prior", "priors", "reparam", "run",
+    "logging", "pp",
+)
+
 
 def _check_keys(section, raw, allowed):
     unknown = sorted(set(raw or ()) - set(allowed))
@@ -109,6 +122,20 @@ def _check_keys(section, raw, allowed):
             f"Valid keys: {', '.join(sorted(allowed))}")
 
 
+def _check_required(raw):
+    absent = [s for s in REQUIRED_SECTIONS if not isinstance(raw.get(s), dict)]
+    if absent:
+        raise ValueError(
+            f"missing config section(s): {', '.join(absent)}. Required: "
+            f"{', '.join(REQUIRED_SECTIONS)}")
+    for section, keys in REQUIRED_SECTIONS.items():
+        missing = sorted(set(keys) - set(raw[section]))
+        if missing:
+            raise ValueError(
+                f"missing key(s) in config section {section!r}: "
+                f"{', '.join(missing)}")
+
+
 def load_config(path):
     """Return a SimpleNamespace of config sections parsed from YAML.
 
@@ -118,6 +145,11 @@ def load_config(path):
     """
     with open(path) as fh:
         raw = yaml.safe_load(fh)
+
+    if not isinstance(raw, dict):
+        raise ValueError(f"config {path} is empty or not a YAML mapping")
+    _check_keys("<top level>", raw, TOP_LEVEL_SECTIONS)
+    _check_required(raw)
 
     # Defensive coercion: YAML turns a bare `off` into False and an unsigned
     # exponent like `1.0e6` into a string. Normalize the mode string and the

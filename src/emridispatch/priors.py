@@ -15,7 +15,8 @@ from emridispatch.parameters import PARAM_NAMES
 __all__ = [
     "Prior", "Uniform", "PeriodicUniform", "LogUniform", "Gaussian",
     "Sine", "Cosine", "CallablePrior", "JointPrior",
-    "prior_from_spec", "joint_prior_from_box", "joint_prior_from_specs",
+    "prior_from_spec", "joint_prior_from_box", "joint_prior_from_config",
+    "joint_prior_from_specs",
 ]
 
 
@@ -415,6 +416,16 @@ def joint_prior_from_box(mins, maxes, periodic_indices=(), names=None,
         joint = joint.replace(name, prior_from_spec(
             spec, default_min=mins[i], default_max=maxes[i]))
     return joint
+
+
+def joint_prior_from_config(cfg, mins, maxes):
+    """The JointPrior a run samples under, given its prior box.
+
+    Single source of truth for the box -> prior step: the pipeline builds the
+    sampler's prior with it, and the P-P harness draws its truths from it.
+    """
+    return joint_prior_from_box(mins, maxes, cfg.prior.periodic_2pi_indices,
+                                names=PARAM_NAMES, overrides=cfg.priors)
 
 
 def joint_prior_from_specs(specs):

@@ -12,7 +12,7 @@ from scipy.fft import next_fast_len
 
 from emridispatch.noise import (
     load_sensitivity_table, noise_sens_kwargs, sensitivity_spec)
-from emridispatch.parameters import mass1_mass2_from_log_masses
+from emridispatch.parameters import physical_from_vector
 from emridispatch.response import InjectionModel
 
 logger = logging.getLogger(__name__)
@@ -490,35 +490,9 @@ class LisatoolsEMRILikelihood(EMRIInjectionGenerator, InjectionModel):
 
     def __call__(self, params):
         try:
-            log_mass_1 = params[0]
-            log_mass_2 = params[1]
-            mass_1, mass_2 = mass1_mass2_from_log_masses(log_mass_1, log_mass_2)
-            spin = params[2]
-            semilatus_rectum = params[3]
-            eccentricity = params[4]
-            dist = params[5]
-            q_s = params[6]
-            phi_s = params[7]
-            q_k = params[8]
-            phi_k = params[9]
-            phi_phi = params[10]
-            phi_r = params[11]
+            template_params = physical_from_vector(params, self.default_parameters)
         except Exception:
             return -np.inf
-
-        template_params = self.default_parameters.copy()
-        template_params["mass_1"] = mass_1
-        template_params["mass_2"] = mass_2
-        template_params["a"] = spin
-        template_params["p"] = semilatus_rectum
-        template_params["e"] = eccentricity
-        template_params["luminosity_distance"] = dist
-        template_params["q_s"] = q_s
-        template_params["phi_s"] = phi_s
-        template_params["q_k"] = q_k
-        template_params["phi_k"] = phi_k
-        template_params["phi_phi"] = phi_phi
-        template_params["phi_r"] = phi_r
 
         try:
             result = self.evaluate_likelihood(template_params)
