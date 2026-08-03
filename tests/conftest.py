@@ -47,7 +47,6 @@ data:""" + """
 sampler:
   nsamples: 200
   impulse:
-    threads: 1
     cov_update: 50
     save_freq: 50
     ladder:

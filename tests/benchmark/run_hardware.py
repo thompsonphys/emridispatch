@@ -72,7 +72,6 @@ run:
 IMPULSE_BLOCK = """  backend: impulse
   nsamples: 60
   impulse:
-    threads: 1
     cov_update: 30
     save_freq: 30
     ladder:

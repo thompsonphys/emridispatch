@@ -75,7 +75,6 @@ sampler:
   start_jitter: 5.0      # fisher-mode dispersion in Fisher sigmas
 
   impulse:
-    threads: 1           # MUST be 1 using FEW: FEW's generator is not thread-safe
     cov_update: 200      # adapt proposal covariance every N steps
     save_freq: 200       # flush chains / checkpoint every N steps.
                          # Currently must be >= cov_update using impulse

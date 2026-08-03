@@ -63,7 +63,7 @@ SAMPLER_DEFAULTS = {
     "backend": "impulse", "nsamples": 10000,
     "start_mode": "truth", "start_jitter": 5.0,
 }
-IMPULSE_DEFAULTS = {"threads": 1, "cov_update": 200, "save_freq": 200}
+IMPULSE_DEFAULTS = {"cov_update": 200, "save_freq": 200}
 LADDER_DEFAULTS = {
     "max_temp": 1000.0, "t_split": 25.0, "ntemps_low": 20,
     "ntemps_high": 6, "adapt": False, "adapt_nu": 10.0, "adapt_t0": 100.0,

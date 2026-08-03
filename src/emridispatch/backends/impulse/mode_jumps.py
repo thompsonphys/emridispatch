@@ -25,25 +25,23 @@ class CrossChainPool:
         self.capacity = capacity
         self._buf = np.empty((capacity, ndim))
         self._n = 0        # total pushed
-        self._filled = 0   # valid rows
 
     def push(self, x: np.ndarray) -> None:
         self._buf[self._n % self.capacity] = x
         self._n += 1
-        self._filled = min(self._filled + 1, self.capacity)
 
     def __len__(self) -> int:
-        return self._filled
+        return min(self._n, self.capacity)
 
     def sample_two(self, rng) -> tuple[np.ndarray, np.ndarray]:
-        i = rng.integers(0, self._filled)
-        j = rng.integers(0, self._filled)
+        i = rng.integers(0, len(self))
+        j = rng.integers(0, len(self))
         while j == i:
-            j = rng.integers(0, self._filled)
+            j = rng.integers(0, len(self))
         return self._buf[i], self._buf[j]
 
     def view(self) -> np.ndarray:
-        return self._buf[: self._filled]
+        return self._buf[: len(self)]
 
 
 class PopulationDEJump:
@@ -208,10 +206,14 @@ def build_mode_jumps(method: str, ndim: int, dims, weight: float = 25.0,
     method: "none" | "popde" | "gmm" | "popde+gmm".
     ``dims`` are the coordinates the GMM models.
     """
+    if method not in ("none", "popde", "gmm", "popde+gmm"):
+        raise ValueError(
+            f"sampler.impulse.mode_jump.method must be one of "
+            f"none | popde | gmm | popde+gmm (got {method!r})")
     pool = CrossChainPool(ndim, capacity=pool_capacity)
     jumps = []
     if "popde" in method:
         jumps.append((PopulationDEJump(pool), weight))
     if "gmm" in method:
         jumps.append((GMMModeJump(pool, dims=dims, seed=seed), weight))
-    return jumps, pool
+    return jumps

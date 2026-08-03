@@ -54,7 +54,6 @@ class ImpulseBackend:
         method = imp.mode_jump.method
         mode_jump_weight = imp.mode_jump.weight
         nsamples = cfg.sampler.nsamples
-        threads = imp.threads  # MUST be 1: FEW's generator is not thread-safe
         outdir = problem.outdir
         seed = problem.seed
 
@@ -74,23 +73,23 @@ class ImpulseBackend:
             ntemps=ntemps, ladder=ladder, swap_steps=1,
             inf_temp=False,  # inf chain already the top rung of ladder
             adapt_t0=adapt_t0, adapt_nu=adapt_nu,  # frozen when adapt is off
-            de_weight=50.0, cov_update=imp.cov_update,
+            cov_update=imp.cov_update,
             save_freq=imp.save_freq,
-            seed=seed, vectorized=False, threads=threads,
+            seed=seed, vectorized=False,
             periodic=w.periodic, outdir=outdir, resume=resume,
         )
 
         # Adaptive mode-jump proposal(s), learning modes online from a shared
         # cross-chain pool ("none" adds none). The GMM models the (whitened)
         # intrinsic block = the reparam indices.
-        mode_jumps, mode_pool = build_mode_jumps(
+        mode_jumps = build_mode_jumps(
             method, problem.ndim, dims=np.asarray(problem.reparam.idx),
             weight=mode_jump_weight, seed=seed)
         for jump, jw in mode_jumps:
             sampler.add_custom_jump(jump, weight=jw)
 
-        logger.info("impulse: ntemps=%d nsamples=%d threads=%d outdir=%s",
-                    ntemps, nsamples, threads, outdir)
+        logger.info("impulse: ntemps=%d nsamples=%d outdir=%s",
+                    ntemps, nsamples, outdir)
         logger.info("ladder (dense low-T): %s",
                     np.array2string(ladder, precision=1, max_line_width=120))
         logger.info("ladder adapt: %s%s", adapt,

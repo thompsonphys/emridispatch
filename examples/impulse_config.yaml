@@ -36,7 +36,6 @@ sampler:
   backend: impulse
   nsamples: 200
   impulse:
-    threads: 1       # MUST be 1 using FEW: FEW's generator is not thread-safe
     cov_update: 200
     save_freq: 200   # MUST be >= cov_update (ShortChain ring is save_freq deep)
     ladder:

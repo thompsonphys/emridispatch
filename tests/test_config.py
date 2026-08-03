@@ -17,7 +17,7 @@ BASE = {
     "data": {"response": "toy", "duration": 0.3, "delta_t": 10.0,
              "inj_snr": 30.0, "channels": ["A", "E"]},
     "sampler": {"nsamples": 100,
-                "impulse": {"threads": 1, "cov_update": 50, "save_freq": 50,
+                "impulse": {"cov_update": 50, "save_freq": 50,
                             "ladder": {"max_temp": 100.0, "t_split": 10.0,
                                        "ntemps_low": 3, "ntemps_high": 2},
                             "mode_jump": {"method": "none", "weight": 25.0}}},
@@ -96,7 +96,7 @@ def test_backend_subsections_optional(tmp_path):
     cfg = load_config(str(path))
     assert cfg.sampler.backend == "impulse"
     assert cfg.sampler.nsamples == 10000
-    assert cfg.sampler.impulse.threads == 1
+    assert cfg.sampler.impulse.cov_update == 200
     assert cfg.sampler.impulse.ladder.max_temp == 1000.0
     assert cfg.sampler.impulse.mode_jump.method == "none"
     assert cfg.sampler.eryn.nwalkers == 32

@@ -14,10 +14,15 @@ def build_ladder(cfg):
     cfg.sampler.impulse.ladder). Returns ntemps_low geomspaced rungs in
     [1, t_split], ntemps_high in (t_split, max_temp], then np.inf (beta=0).
     """
-    return np.concatenate(
+    ladder = np.concatenate(
         [
             np.geomspace(1.0, cfg.t_split, cfg.ntemps_low),
             np.geomspace(cfg.t_split, cfg.max_temp, cfg.ntemps_high + 1)[1:],
             [np.inf],
         ]
     )
+    if ladder[0] != 1.0 or not np.all(np.diff(ladder) > 0):
+        raise ValueError(
+            f"temperature ladder must start at 1.0 and strictly increase, got "
+            f"{ladder}; fix sampler.impulse.ladder")
+    return ladder
