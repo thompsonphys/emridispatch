@@ -138,3 +138,21 @@ def test_a_fresh_start_removes_rungs_the_new_ladder_does_not_write(toy_cfg):
         fh.write("0.0\n")
     get_backend("impulse").run(problem, toy_cfg, resume=False)
     assert not os.path.exists(orphan)
+
+
+def test_a_fresh_start_removes_the_stale_checkpoint(toy_cfg):
+    """impulse reloads sampler_checkpoint.pkl wholesale (`__dict__.update`), so
+    one left behind resurrects the abandoned run's ladder and iteration count
+    on the next default-resume run, which then samples nothing. save_freq is
+    raised to nsamples so this run writes no checkpoint of its own."""
+    pytest.importorskip("impulse")
+    from emridispatch.backends import get_backend
+
+    toy_cfg.sampler.impulse.save_freq = toy_cfg.sampler.nsamples
+    problem = build_problem(toy_cfg)
+    ckpt = os.path.join(problem.outdir, "sampler_checkpoint.pkl")
+    os.makedirs(problem.outdir, exist_ok=True)
+    with open(ckpt, "wb") as fh:
+        fh.write(b"stale")
+    get_backend("impulse").run(problem, toy_cfg, resume=False)
+    assert not os.path.exists(ckpt)

@@ -59,7 +59,9 @@ class ImpulseBackend:
         seed = problem.seed
 
         if not resume:
-            for path in glob.glob(os.path.join(outdir, "chain_*.txt")):
+            stale = (glob.glob(os.path.join(outdir, "chain_*.txt"))
+                     + glob.glob(os.path.join(outdir, "sampler_checkpoint.pkl")))
+            for path in stale:
                 logger.info("impulse: fresh start requested; removing %s", path)
                 os.remove(path)
 
