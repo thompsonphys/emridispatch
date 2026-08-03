@@ -58,6 +58,14 @@ def test_load_and_coercions(tmp_path):
     assert cfg.logging.level == "INFO"
 
 
+@pytest.mark.parametrize("bad", ["foo", None, [1.0]])
+def test_a_bad_injection_value_names_its_key(tmp_path, bad):
+    """float() alone reports the value and not which of the fourteen keys
+    carried it, and for None or a list it reports neither."""
+    with pytest.raises(ValueError, match="injection.mass_2"):
+        load_config(write_cfg(tmp_path, injection={"mass_2": bad}))
+
+
 def test_reparam_off_coercion(tmp_path):
     # Bare `off` parses as YAML boolean False -> normalized to "off".
     cfg = load_config(write_cfg(tmp_path, reparam={"mode": False}))

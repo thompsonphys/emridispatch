@@ -111,15 +111,20 @@ def test_workbench_to_physical_uses_the_shared_mapping():
         VEC, {name: INJECTION[name] for name in UNSAMPLED})
 
 
-def _capture_template(injection, vec):
-    """The template dict __call__ hands to the waveform, without a waveform."""
+def _stub_likelihood(injection, evaluate):
+    """A real instance without __init__, which needs the full lisatools stack."""
     from emridispatch.response.lisatools import LisatoolsEMRILikelihood
 
+    model = object.__new__(LisatoolsEMRILikelihood)
+    model.injection_parameters = dict(injection)
+    model.evaluate_likelihood = evaluate
+    return model
+
+
+def _capture_template(injection, vec):
+    """The template dict __call__ hands to the waveform, without a waveform."""
     seen = {}
-    stub = SimpleNamespace(
-        injection_parameters=dict(injection),
-        evaluate_likelihood=lambda tp: seen.update(tp) or 0.0)
-    LisatoolsEMRILikelihood.__call__(stub, vec)
+    _stub_likelihood(injection, lambda tp: seen.update(tp) or 0.0)(vec)
     return seen
 
 
@@ -141,11 +146,8 @@ def test_likelihood_template_inherits_the_unsampled_parameters():
 
 
 def test_likelihood_rejects_a_short_vector():
-    from emridispatch.response.lisatools import LisatoolsEMRILikelihood
-
-    stub = SimpleNamespace(injection_parameters=dict(INJECTION),
-                           evaluate_likelihood=lambda tp: 0.0)
-    assert LisatoolsEMRILikelihood.__call__(stub, VEC[:-1]) == -np.inf
+    model = _stub_likelihood(INJECTION, lambda tp: 0.0)
+    assert model(VEC[:-1]) == -np.inf
 
 
 def test_pp_draw_truth_uses_the_shared_mapping():

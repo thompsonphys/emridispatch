@@ -45,15 +45,22 @@ def main(argv=None):
     if os.path.abspath(args.config) != os.path.abspath(dest):
         shutil.copyfile(args.config, dest)
 
+    log_file = getattr(cfg.logging, "file", "run.log")
     setup_logging(
         outdir=cfg.run.outdir,
         level=args.log_level or getattr(cfg.logging, "level", "INFO"),
-        filename=getattr(cfg.logging, "file", "run.log"),
+        filename=log_file,
     )
 
     from emridispatch.pipeline import run_from_config
 
-    run_from_config(cfg, resume=not args.no_resume)
+    if run_from_config(cfg, resume=not args.no_resume) is None:
+        stale = os.path.exists(os.path.join(cfg.run.outdir, "run_summary.json"))
+        what = ("run_summary.json in the outdir is from an earlier run"
+                if stale else "no run_summary.json written")
+        where = (f" See {os.path.join(cfg.run.outdir, log_file)}"
+                 if log_file else "")
+        raise SystemExit(f"sampler failed; {what}.{where}")
 
 
 if __name__ == "__main__":

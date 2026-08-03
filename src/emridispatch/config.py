@@ -36,11 +36,6 @@ def _as_tdi(v):
     return _TDI_ALIASES[s]
 
 
-def _as_float(v):
-    """Coerce injection scalars to float (YAML may leave `1.0e6` a string)."""
-    return float(v)
-
-
 def _merge_ns(defaults, override, **nested):
     """SimpleNamespace from defaults <- raw-dict override, plus nested sections."""
     return SimpleNamespace(**{**defaults, **(override or {})}, **nested)
@@ -156,7 +151,14 @@ def load_config(path):
     # float injection scalars so a config typo can't reach the sampler.
     raw["reparam"]["mode"] = _as_mode(raw["reparam"]["mode"])
     _check_keys("injection", raw["injection"], INJECTION_KEYS)
-    raw["injection"] = {k: _as_float(v) for k, v in raw["injection"].items()}
+    injection = {}
+    for k, v in raw["injection"].items():
+        try:
+            injection[k] = float(v)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"injection.{k} must be a number (got {v!r})") from None
+    raw["injection"] = injection
 
     raw_data = dict(raw["data"])
     _check_keys("data", raw_data, DATA_DEFAULTS)

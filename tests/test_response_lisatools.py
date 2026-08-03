@@ -1,11 +1,14 @@
+import logging
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 from conftest import STUB_TABLE
+from emridispatch.config import INJECTION_KEYS
+from emridispatch.parameters import NDIM
 from emridispatch.response.lisatools import (
-    _DirectEMRIWaveform, _build_waveform_and_sens)
+    LisatoolsEMRILikelihood, _DirectEMRIWaveform, _build_waveform_and_sens)
 
 
 class _FakeTDIWaveform:
@@ -90,3 +93,92 @@ def test_direct_waveform_call_returns_both_polarizations():
     assert len(out) == 2
     np.testing.assert_array_equal(out[0], h.real)
     np.testing.assert_array_equal(out[1], -h.imag)
+
+
+# --- __call__ failure reporting -------------------------------------------
+
+VEC = np.full(NDIM, 0.5)
+
+
+def _model(evaluate=None, log=None):
+    """A real instance without __init__, which needs the whole lisatools stack.
+
+    lnlike_failures is absent until the first failure records it, and
+    log_lnlike_failures is left to the class default unless `log` is given.
+    """
+    model = object.__new__(LisatoolsEMRILikelihood)
+    model.injection_parameters = {name: 1.0 for name in INJECTION_KEYS}
+    model.evaluate_likelihood = evaluate or (lambda template: 0.0)
+    if log is not None:
+        model.log_lnlike_failures = log
+    return model
+
+
+def _raises(exc):
+    def evaluate(_template):
+        raise exc
+    return evaluate
+
+
+def _warnings(caplog):
+    return [r for r in caplog.records if r.levelno == logging.WARNING]
+
+
+def test_failures_are_silent_by_default(caplog):
+    """A sampler run must not gain log output it did not have before; neither
+    impulse nor eryn reports a likelihood failure either."""
+    assert LisatoolsEMRILikelihood.log_lnlike_failures is False
+    model = _model(_raises(ValueError("p below separatrix")))
+    with caplog.at_level(logging.WARNING, logger="emridispatch"):
+        for _ in range(5):
+            assert model(VEC) == -np.inf
+    assert _warnings(caplog) == []
+
+
+def test_failures_are_counted_whether_or_not_they_are_logged():
+    """The count is the sampler-agnostic half: no log lines, so a run that
+    fails at every point is still distinguishable from a hard injection."""
+    model = _model(_raises(ValueError("p below separatrix")))
+    for _ in range(5):
+        assert model(VEC) == -np.inf
+    assert model.lnlike_failures == {"waveform: ValueError": 5}
+
+
+def test_a_bad_sampling_vector_counts_separately_from_a_waveform_failure():
+    """A short vector is a programming error, never a physical condition, so
+    it must not be pooled with out-of-domain waveforms."""
+    model = _model()
+    assert model(VEC[:-1]) == -np.inf
+    assert model.lnlike_failures == {"parameters: IndexError": 1}
+
+
+def test_opt_in_logging_reports_each_failure_type_once(caplog):
+    """Per-type, not per-call, so enabling it cannot saturate run.log: a
+    TypeError arriving after the ValueErrors is the new information."""
+    model = _model(_raises(ValueError("domain")), log=True)
+    with caplog.at_level(logging.WARNING, logger="emridispatch"):
+        model(VEC)
+        model(VEC)
+        model.evaluate_likelihood = _raises(TypeError("bad container"))
+        model(VEC)
+        model(VEC)
+    assert len(_warnings(caplog)) == 2
+    assert "domain" in _warnings(caplog)[0].getMessage()
+    assert model.lnlike_failures == {"waveform: ValueError": 2,
+                                     "waveform: TypeError": 2}
+
+
+def test_the_first_logged_failure_carries_a_traceback(caplog):
+    """The point of opting in is locating a bug, not counting it."""
+    model = _model(_raises(TypeError("bad container")), log=True)
+    with caplog.at_level(logging.WARNING, logger="emridispatch"):
+        model(VEC)
+    assert _warnings(caplog)[0].exc_info is not None
+
+
+def test_a_successful_call_records_no_failure(caplog):
+    model = _model(lambda template: -3.5)
+    with caplog.at_level(logging.WARNING, logger="emridispatch"):
+        assert model(VEC) == -3.5
+    assert _warnings(caplog) == []
+    assert getattr(model, "lnlike_failures", {}) == {}

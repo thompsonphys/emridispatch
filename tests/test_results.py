@@ -15,7 +15,7 @@ from conftest import (
 from emridispatch.parameters import NDIM, PARAM_NAMES
 from emridispatch.priors import (
     CallablePrior, Gaussian, JointPrior, Sine, Uniform, joint_prior_from_specs)
-from emridispatch.results import Results, convert, detect_backend
+from emridispatch.results import _EXTRA_COLS, Results, convert, detect_backend
 from emridispatch.results import main as postprocess_main
 
 
@@ -109,6 +109,27 @@ def test_save_load_roundtrip(tmp_path):
     assert "backend: impulse" in back.config_yaml
     assert "versions:" in back.run_log
     assert json.loads(back.run_summary)["config"]["backend"] == "impulse"
+
+
+@pytest.mark.parametrize("value", ["null", "''", "0", "[run, log]"])
+def test_an_unusable_log_filename_attaches_no_log(tmp_path, value):
+    """setup_logging writes no file for a falsy logging.file, so `file: null`
+    is a valid config; reading the run dir back must honour it rather than
+    joining it into a path."""
+    run = make_run_dir(tmp_path)
+    (run / "config.yaml").write_text(f"logging:\n  file: {value}\n")
+    (run / "run.log").write_text("versions: ...\n")
+    assert convert(run).run_log is None
+
+
+def test_a_renamed_log_file_is_still_attached(tmp_path):
+    """make_run_dir leaves a run.log behind, so the name has to come from the
+    config rather than from whichever file happens to exist."""
+    run = make_run_dir(tmp_path)
+    (run / "config.yaml").write_text("logging:\n  file: sampler.log\n")
+    (run / "run.log").write_text("the default name\n")
+    (run / "sampler.log").write_text("the configured name\n")
+    assert convert(run).run_log == "the configured name\n"
 
 
 def test_load_rejects_wrong_version(tmp_path):
@@ -269,6 +290,51 @@ def test_roundtrip_preserves_nwalkers(tmp_path):
     assert back.nwalkers == ERYN_NW
     assert back.nsteps == ERYN_IT
     assert np.allclose(back.rung(0, burn=2), res.rung(0, burn=2))
+
+
+def _set_chain_width(run, ncols):
+    """Rewrite every chain file at a different column count, as a run whose
+    sampling vector had a different length would have written it."""
+    for path in sorted(run.glob("chain_*.txt")):
+        cols = np.loadtxt(path, ndmin=2)
+        keep = min(ncols, cols.shape[1])
+        wide = np.zeros((len(cols), ncols))
+        wide[:, :keep] = cols[:, :keep]
+        np.savetxt(path, wide)
+
+
+@pytest.mark.parametrize("extra", [-1, 1, 3])
+def test_impulse_converter_rejects_a_wrong_chain_width(tmp_path, extra):
+    """Reading a chain file is positional, so a width other than the expected
+    one shifts every column after the parameters: one extra parameter column
+    makes that parameter the lnlike, and the temperature read from `accepted`.
+    Every value stays plausible, so only the width itself can catch it."""
+    run = make_run_dir(tmp_path)
+    ncols = NDIM + _EXTRA_COLS + extra
+    _set_chain_width(run, ncols)
+    with pytest.raises(ValueError, match=f"{ncols} column"):
+        convert(run)
+
+
+@pytest.mark.filterwarnings("ignore:.*input contained no data.*")
+def test_an_empty_chain_file_is_reported_as_empty_not_as_a_bad_width(tmp_path):
+    """A run killed before impulse's first save_freq flush leaves chain files
+    with no rows, which np.loadtxt reports as shape (0, 1) -- a width the
+    column check would otherwise blame on a mismatched version."""
+    run = make_run_dir(tmp_path)
+    (run / "chain_0.txt").write_text("")
+    with pytest.raises(ValueError, match="empty chain files"):
+        convert(run)
+
+
+def test_impulse_converter_rejects_rungs_of_differing_widths(tmp_path):
+    """np.stack fails on this anyway, but two frames later and without naming
+    the widths."""
+    run = make_run_dir(tmp_path)
+    cols = np.loadtxt(run / "chain_1.txt", ndmin=2)
+    np.savetxt(run / "chain_1.txt", cols[:, :-1])
+    with pytest.raises(ValueError, match="column"):
+        convert(run)
 
 
 def test_impulse_lnprob_is_tempered_and_lnprior_recovered(tmp_path):

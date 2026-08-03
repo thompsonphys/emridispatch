@@ -4,6 +4,7 @@ Custom jump proposals follow `proposal(chain_stats) -> (q, qxy)`.
 Output: chain_N.txt per temperature under outdir.
 """
 
+import glob
 import json
 import logging
 import os
@@ -56,6 +57,11 @@ class ImpulseBackend:
         threads = imp.threads  # MUST be 1: FEW's generator is not thread-safe
         outdir = problem.outdir
         seed = problem.seed
+
+        if not resume:
+            for path in glob.glob(os.path.join(outdir, "chain_*.txt")):
+                logger.info("impulse: fresh start requested; removing %s", path)
+                os.remove(path)
 
         # Sampling-space view: reparam-wrapped callables, transformed start/cov.
         w = problem.wrapped()

@@ -450,9 +450,13 @@ class EMRIInjectionGenerator:
 
 
 class LisatoolsEMRILikelihood(EMRIInjectionGenerator, InjectionModel):
+
+    log_lnlike_failures = False
+
     def __init__(self, injection_parameters, vectorized=False, **kwargs):
         super().__init__(injection_parameters, **kwargs)
         self.vectorized = vectorized
+        self.lnlike_failures = {}
 
     @classmethod
     def from_config(cls, cfg):
@@ -482,7 +486,8 @@ class LisatoolsEMRILikelihood(EMRIInjectionGenerator, InjectionModel):
         """
         try:
             template_params = physical_from_vector(params, self.injection_parameters)
-        except Exception:
+        except Exception as err:
+            self._note_lnlike_failure("parameters", err)
             return -np.inf
 
         try:
@@ -491,10 +496,28 @@ class LisatoolsEMRILikelihood(EMRIInjectionGenerator, InjectionModel):
             if hasattr(result, "get"):
                 result = result.get()
             result = np.real(result)
-        except Exception:
+        except Exception as err:
+            self._note_lnlike_failure("waveform", err)
             return -np.inf
 
         if np.isfinite(result):
             return float(result)
         else:
             return -np.inf
+
+    def _note_lnlike_failure(self, stage, err):
+        """Count a swallowed __call__ failure, keyed "<stage>: <ExceptionType>".
+
+        Silent unless log_lnlike_failures is set, which then logs the first of
+        each kind.
+        """
+        failures = getattr(self, "lnlike_failures", None)
+        if failures is None:
+            failures = self.lnlike_failures = {}
+        key = f"{stage}: {type(err).__name__}"
+        failures[key] = failures.get(key, 0) + 1
+        if self.log_lnlike_failures and failures[key] == 1:
+            logger.warning(
+                "lnlike %s failure, returning -inf: %s: %s. Later failures of "
+                "this kind are counted in lnlike_failures, not logged",
+                stage, type(err).__name__, err, exc_info=True)

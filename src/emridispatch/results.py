@@ -395,10 +395,11 @@ def _attach_run_files(results, run_dir):
             log_name = (raw.get("logging") or {}).get("file", "run.log")
         except Exception:
             pass
-    log_path = os.path.join(run_dir, log_name)
-    if results.run_log is None and os.path.exists(log_path):
-        with open(log_path, errors="replace") as fh:
-            results.run_log = fh.read()
+    if isinstance(log_name, str) and log_name:
+        log_path = os.path.join(run_dir, log_name)
+        if results.run_log is None and os.path.exists(log_path):
+            with open(log_path, errors="replace") as fh:
+                results.run_log = fh.read()
 
     summary_path = os.path.join(run_dir, "run_summary.json")
     if results.run_summary is None and os.path.exists(summary_path):
@@ -586,14 +587,16 @@ def _convert_impulse(run_dir):
     indexed.sort()
 
     arrs = [np.loadtxt(p, ndmin=2) for _, p in indexed]
-    ncols = arrs[0].shape[1]
-    if ncols < NDIM + _EXTRA_COLS:
-        raise ValueError(
-            f"{run_dir}: chain files have {ncols} columns, expected at least "
-            f"{NDIM + _EXTRA_COLS}")
     nsteps = min(len(a) for a in arrs)
     if nsteps < 1:
         raise ValueError(f"{run_dir}: empty chain files")
+    widths = sorted({a.shape[1] for a in arrs})
+    if widths != [NDIM + _EXTRA_COLS]:
+        raise ValueError(
+            f"{run_dir}: chain files have {', '.join(map(str, widths))} "
+            f"column(s), expected {NDIM + _EXTRA_COLS} ({NDIM} parameters + "
+            f"lnlike, lnprob, accepted, temperature). Convert with the "
+            f"emridispatch version that wrote them.")
     if any(len(a) != nsteps for a in arrs):
         logger.warning("rungs have unequal lengths; truncating all to %d steps",
                        nsteps)

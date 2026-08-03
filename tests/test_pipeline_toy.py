@@ -122,3 +122,19 @@ def test_impulse_backend_end_to_end(toy_cfg):
     assert summary is not None
     assert os.path.exists(os.path.join(problem.outdir, "run_summary.json"))
     assert os.path.exists(os.path.join(problem.outdir, "chain_0.txt"))
+
+
+def test_a_fresh_start_removes_rungs_the_new_ladder_does_not_write(toy_cfg):
+    """impulse truncates only the rungs it is handed, so a shorter ladder run
+    into the same outdir would leave the old top rungs for the converter to
+    read back as genuine ones."""
+    pytest.importorskip("impulse")
+    from emridispatch.backends import get_backend
+
+    problem = build_problem(toy_cfg)
+    orphan = os.path.join(problem.outdir, "chain_99.txt")
+    os.makedirs(problem.outdir, exist_ok=True)
+    with open(orphan, "w") as fh:
+        fh.write("0.0\n")
+    get_backend("impulse").run(problem, toy_cfg, resume=False)
+    assert not os.path.exists(orphan)
