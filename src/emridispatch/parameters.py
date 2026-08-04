@@ -2,7 +2,7 @@
 
 PARAM_NAMES is the sampling vector (masses in log) and VECTOR_TO_PHYSICAL maps
 its rows to injection-dict keys. Injection keys absent from that mapping are not
-sampled (the equatorial model leaves them Fisher-singular).
+sampled at the moment.
 """
 
 import numpy as np
@@ -27,6 +27,15 @@ VECTOR_TO_PHYSICAL = {
     "q_k": "q_k", "phi_k": "phi_k", "phi_phi": "phi_phi", "phi_r": "phi_r",
 }
 
+# GenerateEMRIWaveform positional order -> injection-dict key. SEF keys its
+# wave_params by these names and splats the values into the same generator.
+FEW_TO_INJECTION = {
+    "m1": "mass_1", "m2": "mass_2", "a": "a", "p0": "p", "e0": "e",
+    "xI0": "x", "dist": "luminosity_distance", "qS": "q_s", "phiS": "phi_s",
+    "qK": "q_k", "phiK": "phi_k", "Phi_phi0": "phi_phi",
+    "Phi_theta0": "phi_theta", "Phi_r0": "phi_r",
+}
+
 # Fisher covariance / prior-box intrinsic parameter order (injection-dict keys).
 INTRINSIC_ORDER = ["mass_1", "mass_2", "a", "p", "e", "luminosity_distance"]
 # Sampled in log space. bounds.py and reparam.py additionally require these to
@@ -48,6 +57,13 @@ ANGLE_RANGES = [
 
 # Default 2*pi-periodic sampling-vector indices (phi_s, phi_k, phi_phi, phi_r).
 DEFAULT_PERIODIC_2PI_INDICES = [7, 9, 10, 11]
+
+
+def few_params(inj):
+    """FEW-keyed parameters in GenerateEMRIWaveform/SEF positional order.
+
+    """
+    return {name: float(inj[key]) for name, key in FEW_TO_INJECTION.items()}
 
 
 def truth_vector(inj):

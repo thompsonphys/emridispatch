@@ -110,7 +110,8 @@ def fisher_key_from_config(cfg):
         str(getattr(cfg.data, "tdi", "2nd generation")),
         bool(getattr(cfg.data, "foreground", True)),
         cfg.data.duration, cfg.data.delta_t,
-        None if channels is None else list(channels))
+        None if channels is None else list(channels),
+    ) + f"|provider={get_fisher_provider(cfg).name}"
 
 
 def build_problem(cfg, resume=True):

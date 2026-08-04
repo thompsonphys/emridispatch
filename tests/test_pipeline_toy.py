@@ -61,6 +61,27 @@ def test_build_problem_resume_uses_cache(toy_cfg):
     assert np.allclose(p1.proposal_cov, p2.proposal_cov)
 
 
+def test_resume_rejects_a_cache_built_by_another_fisher_provider(toy_cfg):
+    build_problem(toy_cfg)
+    toy_cfg.prior.fisher = "manual"
+    toy_cfg.prior.sigmas = {"mass_1": 1.0, "mass_2": 1e-4, "a": 1e-5,
+                            "p": 1e-6, "e": 1e-6, "luminosity_distance": 0.05}
+    with pytest.raises(ValueError, match="Fisher-relevant config"):
+        build_problem(toy_cfg, resume=True)
+
+
+def test_fisher_key_uses_the_resolved_provider_not_the_config_string(toy_cfg):
+    from emridispatch.fisher import _sef_importable
+    from emridispatch.pipeline import fisher_key_from_config
+
+    if not _sef_importable():
+        pytest.skip("stableemrifisher not installed: auto resolves to heuristic")
+    toy_cfg.prior.fisher = "auto"
+    auto_key = fisher_key_from_config(toy_cfg)
+    toy_cfg.prior.fisher = "sef"
+    assert fisher_key_from_config(toy_cfg) == auto_key
+
+
 def test_prior_overrides_reach_problem(toy_cfg):
     toy_cfg.priors = {"q_s": {"type": "sine"}, "q_k": {"type": "sine"}}
     problem = build_problem(toy_cfg)

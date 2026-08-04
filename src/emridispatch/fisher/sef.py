@@ -11,6 +11,7 @@ import numpy as np
 from emridispatch.fisher import FisherResult
 from emridispatch.noise import (
     channel_noise_psd, per_channel_noise_kwargs, sensitivity_spec)
+from emridispatch.parameters import FEW_TO_INJECTION, few_params
 
 logger = logging.getLogger(__name__)
 
@@ -74,22 +75,7 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
     # the Fisher-derived widths correspond to the SAME data the sampler analyses.
     dt = delta_t
     T = duration
-    wave_params = {
-        "m1": input_parameters["mass_1"],
-        "m2": input_parameters["mass_2"],
-        "a": input_parameters["a"],
-        "p0": input_parameters["p"],
-        "e0": input_parameters["e"],
-        "xI0": input_parameters["x"],
-        "dist": input_parameters["luminosity_distance"],
-        "qS": input_parameters["q_s"],
-        "phiS": input_parameters["phi_s"],
-        "qK": input_parameters["q_k"],
-        "phiK": input_parameters["phi_k"],
-        "Phi_phi0": input_parameters["phi_phi"],
-        "Phi_theta0": input_parameters["phi_theta"],
-        "Phi_r0": input_parameters["phi_r"],
-    }
+    wave_params = few_params(input_parameters)
 
     waveform_class = FastKerrEccentricEquatorialFlux
     waveform_class_kwargs = {
@@ -191,16 +177,8 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
 
     param_cov = np.linalg.inv(fisher_matrix)
     param_cov = 0.5 * (param_cov + param_cov.T)
-    key_map = {
-        "m1": "mass_1",
-        "m2": "mass_2",
-        "a": "a",
-        "p0": "p",
-        "e0": "e",
-        "dist": "luminosity_distance",
-    }
 
-    order = [key_map[k] for k in delta_range.keys()]
+    order = [FEW_TO_INJECTION[k] for k in param_names]
     sigmas = {name: param_cov[i, i] ** (1 / 2) for i, name in enumerate(order)}
 
     return sigmas, param_cov, order

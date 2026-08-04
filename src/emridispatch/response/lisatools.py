@@ -12,7 +12,7 @@ from scipy.fft import next_fast_len
 
 from emridispatch.noise import (
     load_sensitivity_table, noise_sens_kwargs, sensitivity_spec)
-from emridispatch.parameters import physical_from_vector
+from emridispatch.parameters import few_params, physical_from_vector
 from emridispatch.response import InjectionModel
 
 logger = logging.getLogger(__name__)
@@ -150,39 +150,6 @@ class EMRIInjectionGenerator:
         )
         self._lnlike_const = self._noise_term - 0.5 * self._d_d
 
-    @staticmethod
-    def _get_params(params):
-        M = params["mass_1"]
-        a = params["a"]
-        mu = params["mass_2"]
-        p0 = params["p"]
-        e0 = params["e"]
-        x0 = params["x"]
-        qK = params["q_k"]
-        phiK = params["phi_k"]
-        qS = params["q_s"]
-        phiS = params["phi_s"]
-        dist = params["luminosity_distance"]
-        Phi_phi0 = params["phi_phi"]
-        Phi_theta0 = params["phi_theta"]
-        Phi_r0 = params["phi_r"]
-
-        return [
-            float(M),
-            float(mu),
-            float(a),
-            float(p0),
-            float(e0),
-            float(x0),
-            float(dist),
-            float(qS),
-            float(phiS),
-            float(qK),
-            float(phiK),
-            float(Phi_phi0),
-            float(Phi_theta0),
-            float(Phi_r0),
-        ]
 
     def _pad_to_fft_length(self, channel_strain, xp):
         n = channel_strain.shape[-1]
@@ -310,7 +277,7 @@ class EMRIInjectionGenerator:
         if params is None:
             params = self.injection_parameters
 
-        _channel_strain = self.waveform_generator(*self._get_params(params))
+        _channel_strain = self.waveform_generator(*few_params(params).values())
 
         try:
             import cupy as _cp
@@ -410,7 +377,7 @@ class EMRIInjectionGenerator:
         strain has shape (nchannels, N) at native length, before FFT
         padding.
         """
-        channels = self.waveform_generator(*self._get_params(params))
+        channels = self.waveform_generator(*few_params(params).values())
         strain = np.asarray([
             np.asarray(c.get() if hasattr(c, "get") else c) for c in channels])
         times = np.arange(strain.shape[-1]) * self.delta_t

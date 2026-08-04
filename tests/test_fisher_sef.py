@@ -106,11 +106,13 @@ def test_get_fisher_provider_channels_none_stays_none(monkeypatch):
 
 class _Recorder:
     seen = {}
+    called = {}
 
     def __init__(self, **kwargs):
         type(self).seen = kwargs
 
     def __call__(self, *args, **kwargs):
+        type(self).called = kwargs
         return np.eye(6)
 
 
@@ -156,6 +158,15 @@ def test_wiring_tdi_2nd_generation_aet(recorded_sef):
     assert all(kw["model"] == "scirdv1" for kw in seen["noise_kwargs"])
     assert all("stochastic_params" in kw for kw in seen["noise_kwargs"])
     assert seen["waveform_generator_kwargs"]["frame"] == "detector"
+
+
+def test_fisher_rows_are_differentiated_in_intrinsic_order(recorded_sef):
+    from emridispatch.parameters import FEW_TO_INJECTION, INTRINSIC_ORDER
+
+    recorded_sef(tdi="off", foreground=False)
+    # SEF fills row i from param_names[i], so this list IS the covariance order.
+    assert ([FEW_TO_INJECTION[k] for k in _Recorder.called["param_names"]]
+            == INTRINSIC_ORDER)
 
 
 def _ill_conditioned_fisher():
