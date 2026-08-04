@@ -138,6 +138,61 @@ def test_eryn_backend_acceptance_rates_ignore_thin_by(toy_cfg):
     assert np.allclose(rates, res.accepted.mean(axis=1))
 
 
+def test_eryn_backend_resumes_untempered_run(toy_cfg):
+    """ntemps=1 must resume like any other run.
+
+    An untempered run has no TemperatureControl, so eryn never writes the betas
+    dataset and it stays at the HDF5 fill value of 0. Handing that back as a
+    real ladder raises, because there is no ladder to load it into.
+    """
+    pytest.importorskip("eryn")
+    import h5py
+
+    from emridispatch.backends import get_backend
+    from emridispatch.pipeline import build_problem
+
+    toy_cfg.sampler.backend = "eryn"
+    toy_cfg.sampler.nsamples = 5
+    toy_cfg.sampler.eryn.nwalkers = 2 * NDIM
+    toy_cfg.sampler.eryn.ntemps = 1
+    problem = build_problem(toy_cfg)
+    backend = get_backend("eryn")
+    assert backend.run(problem, toy_cfg, resume=False) is not None
+    assert backend.run(problem, toy_cfg, resume=True) is not None
+
+    with h5py.File(os.path.join(problem.outdir, CHAIN_NAME), "r") as f:
+        assert int(f["mcmc"].attrs["iteration"]) == 10
+
+
+def test_eryn_backend_rejects_degenerate_initial_ensemble(toy_cfg):
+    """A zero-spread ensemble can never move: the stretch move proposes the
+    walker it started from, so the run reports a healthy acceptance rate for a
+    chain frozen at the start point."""
+    pytest.importorskip("eryn")
+    from emridispatch.backends import get_backend
+    from emridispatch.pipeline import build_problem
+
+    toy_cfg.sampler.backend = "eryn"
+    toy_cfg.sampler.nsamples = 5
+    toy_cfg.sampler.eryn.nwalkers = 2 * NDIM
+    toy_cfg.sampler.eryn.start_spread = 0.0
+    problem = build_problem(toy_cfg)
+    with pytest.raises(ValueError, match="start_spread"):
+        get_backend("eryn").run(problem, toy_cfg, resume=False)
+
+
+def test_eryn_backend_rejects_empty_run(toy_cfg):
+    pytest.importorskip("eryn")
+    from emridispatch.backends import get_backend
+    from emridispatch.pipeline import build_problem
+
+    toy_cfg.sampler.backend = "eryn"
+    toy_cfg.sampler.nsamples = 0
+    problem = build_problem(toy_cfg)
+    with pytest.raises(ValueError, match="nsamples must be at least"):
+        get_backend("eryn").run(problem, toy_cfg, resume=False)
+
+
 def test_eryn_backend_rejects_too_few_walkers(toy_cfg):
     pytest.importorskip("eryn")
     from emridispatch.backends import get_backend

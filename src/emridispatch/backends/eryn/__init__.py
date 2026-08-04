@@ -1,8 +1,8 @@
 """eryn EnsembleSampler backend (optional: `pip install emridispatch[eryn]`).
 
 Config: sampler.eryn (nwalkers, ntemps, Tmax, adaptive_temps,
-adaptation_lag/time, stop_adaptation, burn, thin_by, start_spread,
-move; only "stretch" is supported).
+adaptation_lag/time, stop_adaptation, burn, thin_by, progress,
+start_spread, move; only "stretch" is supported).
 """
 
 import json
@@ -33,7 +33,6 @@ class _WhitenedPrior:
 
     def __init__(self, lnprior, ndim):
         self.lnprior = lnprior
-        self.ndim = int(ndim)
         self.key_order = int(ndim)
 
     def logpdf(self, x):
@@ -113,20 +112,21 @@ class ErynBackend:
         thin_by = int(e.thin_by)
         progress = bool(e.progress)
         start_spread = float(e.start_spread)
+        if nsamples < 1:
+            raise ValueError(
+                f"sampler.nsamples must be at least 1 (got {nsamples})")
+        if ntemps < 1:
+            raise ValueError(
+                f"sampler.eryn.ntemps must be at least 1 (got {ntemps})")
         if nwalkers < 2 * problem.ndim:
             raise ValueError(
                 f"sampler.eryn.nwalkers must be at least 2*ndim = "
-                f"{2 * problem.ndim} (got {nwalkers}): eryn's red-blue stretch "
-                "move splits the ensemble into two halves and each half must "
-                "span the parameter space")
+                f"{2 * problem.ndim} (got {nwalkers})")
 
         move = str(e.move).lower()
         if move != "stretch":
             raise ValueError(
-                f"sampler.eryn.move {move!r} not supported by the eryn backend: "
-                "only 'stretch' is wired in (custom moves need eryn's "
-                "temperature control and periodic containers handed in "
-                "manually)")
+                f"sampler.eryn.move {move!r} not supported; use 'stretch'")
 
         outdir = problem.outdir
         seed = problem.seed
@@ -159,8 +159,23 @@ class ErynBackend:
             os.remove(chain_path)
         os.makedirs(outdir, exist_ok=True)
         backend = HDFBackend(chain_path)
-        resuming = (resume and os.path.exists(chain_path)
-                    and backend.initialized and backend.iteration > 0)
+        resuming = resume and backend.initialized and backend.iteration > 0
+
+        if resuming:
+            logger.info("eryn: resuming from %s at iteration %d",
+                        chain_path, int(backend.iteration))
+            initial_state = backend.get_last_sample()
+            if ntemps == 1:
+                initial_state.betas = None
+        else:
+            coords = _initial_walkers(w.x0, w.proposal_cov, prior,
+                                      ntemps, nwalkers, rng,
+                                      spread=start_spread)
+            if not np.ptp(coords, axis=1).all():
+                raise ValueError(
+                    "initial walkers have zero spread in some dimension; check "
+                    "sampler.eryn.start_spread and the proposal covariance")
+            initial_state = State({"model_0": coords})
 
         sampler = EnsembleSampler(
             nwalkers, problem.ndim, w.lnlike, priors,
@@ -168,16 +183,6 @@ class ErynBackend:
             moves=None,  # default StretchMove(a=2), tempering+periodic wired
             backend=backend, vectorize=False, periodic=periodic,
         )
-
-        if resuming:
-            logger.info("eryn: resuming from %s at iteration %d",
-                        chain_path, int(backend.iteration))
-            initial_state = None  # the sampler loaded the last sample + betas
-        else:
-            coords = _initial_walkers(w.x0, w.proposal_cov, prior,
-                                      max(ntemps, 1), nwalkers, rng,
-                                      spread=start_spread)
-            initial_state = State({"model_0": coords})
 
         logger.info("eryn: ntemps=%d nwalkers=%d nsamples=%d thin_by=%d "
                     "outdir=%s", ntemps, nwalkers, nsamples, thin_by, outdir)

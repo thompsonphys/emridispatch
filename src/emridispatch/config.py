@@ -71,7 +71,7 @@ LADDER_DEFAULTS = {
 MODE_JUMP_DEFAULTS = {"method": "none", "weight": 25.0}
 ERYN_DEFAULTS = {
     "nwalkers": 32, "ntemps": 1, "Tmax": None,
-    "adaptive_temps": True, "adaptation_lag": 10000,
+    "adaptive_temps": False, "adaptation_lag": 10000,
     "adaptation_time": 100, "stop_adaptation": -1, "burn": 0,
     "thin_by": 1, "progress": False, "start_spread": 1.0, "move": "stretch",
 }

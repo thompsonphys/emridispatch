@@ -107,7 +107,7 @@ sampler:
   #   nwalkers: 32        # ensemble walkers per temperature rung
   #   ntemps: 1           # 1 -> untempered; >1 builds an eryn ladder
   #   Tmax: null          # top ladder temperature (.inf allowed)
-  #   adaptive_temps: true
+  #   adaptive_temps: false
   #   stop_adaptation: -1 # step to freeze ladder adaptation (-1: never)
   #   burn: 0             # in-sampler burn-in (not stored); skipped on resume
   #   thin_by: 1

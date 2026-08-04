@@ -147,9 +147,10 @@ class Results:
         ladder ended up, and thermodynamic evidence estimates are invalid. The
         cold rung is unaffected: beta = 1 is pinned.
 
-        The tolerance is deliberately loose. eryn adapts by default and never
-        settles exactly, so a sub-percent wobble is not worth relabelling a rung
-        over -- a strict comparison flags essentially every tempered run.
+        The tolerance is deliberately loose. Ladder adaptation, wherever it is
+        enabled, never settles exactly, so a sub-percent wobble is not worth
+        relabelling a rung over -- a strict comparison flags essentially every
+        adapting run.
         """
         return bool(np.any(self.ladder_drift() > rtol))
 
