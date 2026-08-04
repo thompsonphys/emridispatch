@@ -79,10 +79,6 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
 
     waveform_class = FastKerrEccentricEquatorialFlux
     waveform_class_kwargs = {
-        "inspiral_kwargs": {
-            "err": 1e-11,
-        },
-        "mode_selector_kwargs": {"mode_selection_threshold": 1e-5},
         "sum_kwargs": {"pad_output": True},
         "force_backend": force_backend,  # "cpu" or None (GPU auto)
     }
