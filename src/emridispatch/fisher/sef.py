@@ -102,11 +102,12 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
         channels=channels,
     )
 
+    logger.info("fisher: tdi %s (channels %s, foreground=%s, gpu=%s)",
+                tdi, channels, foreground, use_gpu)
+
     if tdi == "off":
         ResponseWrapper = None
         ResponseWrapper_kwargs = None
-        logger.info("fisher: tdi off (no ResponseWrapper, channels %s, "
-                    "foreground=%s)", channels, foreground)
     else:
         try:
             from lisatools.response import ResponseWrapper
@@ -132,8 +133,6 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
             remove_garbage="zero",
             **tdi_kwargs,
         )
-        logger.info("fisher: tdi %s (channels %s, foreground=%s)",
-                    tdi, channels, foreground)
 
     der_order = 4
     Ndelta = 8

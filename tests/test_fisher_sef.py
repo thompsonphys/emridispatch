@@ -1,3 +1,4 @@
+import logging
 from types import SimpleNamespace
 
 import numpy as np
@@ -158,6 +159,18 @@ def test_wiring_tdi_2nd_generation_aet(recorded_sef):
     assert all(kw["model"] == "scirdv1" for kw in seen["noise_kwargs"])
     assert all("stochastic_params" in kw for kw in seen["noise_kwargs"])
     assert seen["waveform_generator_kwargs"]["frame"] == "detector"
+
+
+@pytest.mark.parametrize("tdi", ["off", "2nd generation"])
+def test_the_fisher_log_records_the_device_it_resolved(recorded_sef, caplog, tdi):
+    if tdi != "off":
+        pytest.importorskip("lisatools.response")
+    with caplog.at_level(logging.INFO, logger="emridispatch"):
+        recorded_sef(tdi=tdi, foreground=False)
+    fisher_lines = [r.getMessage() for r in caplog.records
+                    if r.getMessage().startswith("fisher: tdi")]
+    assert len(fisher_lines) == 1
+    assert "gpu=False" in fisher_lines[0]
 
 
 def test_fisher_rows_are_differentiated_in_intrinsic_order(recorded_sef):
