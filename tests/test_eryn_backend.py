@@ -181,18 +181,6 @@ def test_eryn_backend_rejects_degenerate_initial_ensemble(toy_cfg):
         get_backend("eryn").run(problem, toy_cfg, resume=False)
 
 
-def test_eryn_backend_rejects_empty_run(toy_cfg):
-    pytest.importorskip("eryn")
-    from emridispatch.backends import get_backend
-    from emridispatch.pipeline import build_problem
-
-    toy_cfg.sampler.backend = "eryn"
-    toy_cfg.sampler.nsamples = 0
-    problem = build_problem(toy_cfg)
-    with pytest.raises(ValueError, match="nsamples must be at least"):
-        get_backend("eryn").run(problem, toy_cfg, resume=False)
-
-
 def test_eryn_backend_rejects_too_few_walkers(toy_cfg):
     pytest.importorskip("eryn")
     from emridispatch.backends import get_backend

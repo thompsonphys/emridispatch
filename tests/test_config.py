@@ -66,6 +66,31 @@ def test_a_bad_injection_value_names_its_key(tmp_path, bad):
         load_config(write_cfg(tmp_path, injection={"mass_2": bad}))
 
 
+@pytest.mark.parametrize("bad", [0, -1, float("inf"), "abc", None])
+def test_a_run_with_no_samples_is_rejected(tmp_path, bad):
+    """An empty run still writes run_summary.json, so results.is_complete()
+    reports success for a dir that cannot be converted."""
+    with pytest.raises(ValueError, match="sampler.nsamples must be"):
+        load_config(write_cfg(tmp_path, sampler={"nsamples": bad}))
+
+
+@pytest.mark.parametrize("bad", [0, -1, float("inf")])
+def test_the_pp_chain_length_override_is_checked_too(tmp_path, bad):
+    """pp.nsamples replaces sampler.nsamples after load_config has run."""
+    with pytest.raises(ValueError, match="pp.nsamples must be"):
+        load_config(write_cfg(tmp_path, extra={"pp": {"nsamples": bad}}))
+
+
+@pytest.mark.parametrize("key", ["sampler", "pp"])
+def test_nsamples_accepts_an_unsigned_exponent(tmp_path, key):
+    # YAML parses 1e4 as a string, not a number.
+    cfg = load_config(write_cfg(tmp_path, extra={"pp": {"nsamples": "1e4"}})
+                      if key == "pp" else
+                      write_cfg(tmp_path, sampler={"nsamples": "1e4"}))
+    assert getattr(cfg, key).nsamples == 10000
+    assert isinstance(getattr(cfg, key).nsamples, int)
+
+
 def test_reparam_off_coercion(tmp_path):
     # Bare `off` parses as YAML boolean False -> normalized to "off".
     cfg = load_config(write_cfg(tmp_path, reparam={"mode": False}))

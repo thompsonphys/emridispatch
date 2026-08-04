@@ -112,9 +112,6 @@ class ErynBackend:
         thin_by = int(e.thin_by)
         progress = bool(e.progress)
         start_spread = float(e.start_spread)
-        if nsamples < 1:
-            raise ValueError(
-                f"sampler.nsamples must be at least 1 (got {nsamples})")
         if ntemps < 1:
             raise ValueError(
                 f"sampler.eryn.ntemps must be at least 1 (got {ntemps})")

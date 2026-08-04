@@ -36,6 +36,17 @@ def _as_tdi(v):
     return _TDI_ALIASES[s]
 
 
+def _as_nsamples(label, v):
+    """Positive int chain length; YAML leaves an unsigned exponent a string."""
+    try:
+        n = int(float(v))
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(f"{label} must be a number (got {v!r})") from None
+    if n < 1:
+        raise ValueError(f"{label} must be at least 1 (got {n})")
+    return n
+
+
 def _merge_ns(defaults, override, **nested):
     """SimpleNamespace from defaults <- raw-dict override, plus nested sections."""
     return SimpleNamespace(**{**defaults, **(override or {})}, **nested)
@@ -195,6 +206,12 @@ def load_config(path):
             mode_jump=_merge_ns(MODE_JUMP_DEFAULTS, raw_mode_jump)),
         eryn=_merge_ns(ERYN_DEFAULTS, raw_eryn))
 
+    sampler.nsamples = _as_nsamples("sampler.nsamples", sampler.nsamples)
+
+    raw_pp = dict(raw.get("pp") or {})
+    if raw_pp.get("nsamples") is not None:
+        raw_pp["nsamples"] = _as_nsamples("pp.nsamples", raw_pp["nsamples"])
+
     return SimpleNamespace(
         injection=raw["injection"],                     # kept a dict for the generator
         data=_merge_ns(DATA_DEFAULTS, raw_data),
@@ -207,5 +224,5 @@ def load_config(path):
         reparam=SimpleNamespace(**raw["reparam"]),
         run=SimpleNamespace(**raw["run"]),
         logging=_merge_ns(LOGGING_DEFAULTS, raw.get("logging")),
-        pp=SimpleNamespace(**(raw.get("pp") or {})),
+        pp=SimpleNamespace(**raw_pp),
     )

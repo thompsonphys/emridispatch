@@ -132,6 +132,8 @@ def main():
     p.add_argument("--no-report", action="store_true", help="skip the diagnostics report at the end")
     p.add_argument("--log-level", default=None, help="override the config logging level")
     args = p.parse_args()
+    if args.nsamples is not None and args.nsamples < 1:
+        p.error("--nsamples must be at least 1")
 
     cfg_base = load_config(args.base)
     mc_root = os.path.abspath(args.outdir)

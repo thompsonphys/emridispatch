@@ -277,6 +277,8 @@ def main():
     p.add_argument("--no-plot", action="store_true", help="skip pp_plot.png")
     p.add_argument("--log-level", default=None, help="override the config logging level")
     args = p.parse_args()
+    if args.nsamples is not None and args.nsamples < 1:
+        p.error("--nsamples must be at least 1")
 
     cfg = load_config(args.base)
     nruns = args.nruns if args.nruns is not None else int(getattr(cfg.pp, "nruns", 50))
