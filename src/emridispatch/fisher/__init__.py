@@ -85,7 +85,7 @@ def get_fisher_provider(cfg):
             channels=None if _channels is None else list(_channels))
     if kind == "manual":
         return _manual.ManualFisherProvider.from_config(cfg)
-    if kind in ("none", "heuristic"):
+    if kind == "none":
         return _manual.HeuristicFisherProvider()
     raise ValueError(
         f"unknown prior.fisher setting {kind!r} "
