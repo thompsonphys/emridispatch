@@ -76,11 +76,9 @@ class HeuristicFisherProvider:
 
     def compute(self, injection_parameters, *, duration, delta_t, use_gpu=None):
         logger.warning(
-            "fisher: no Fisher provider available -> using HEURISTIC prior "
-            "widths (relative %s, absolute %s). These are placeholders: the "
-            "prior box and proposal covariance are NOT calibrated to the data. "
-            "Install `emridispatch[fisher]` or configure prior.fisher: manual for "
-            "real runs.", self.REL, self.ABS)
+            "fisher: HEURISTIC placeholder widths (relative %s, absolute %s); "
+            "prior box and proposal are not calibrated. Use prior.fisher: sef "
+            "or manual for real runs.", self.REL, self.ABS)
         sigmas = {}
         for p in INTRINSIC_ORDER:
             if p in self.REL:
