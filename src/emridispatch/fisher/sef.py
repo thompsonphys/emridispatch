@@ -92,8 +92,7 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
     INDEX_LAMBDA = 8
     INDEX_BETA = 7
 
-    # with longer signals we care less about this
-    t0 = 20000.0  # throw away on both ends when our orbital information is weird
+    t0 = 30000.0
 
     sens_classes, channels = sensitivity_spec(tdi, channels)
     extra_sef_kwargs = dict(

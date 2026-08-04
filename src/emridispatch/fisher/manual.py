@@ -1,7 +1,7 @@
 """Fisher providers that need no Fisher code: user-configured or heuristic.
 
 ManualFisherProvider reads prior.sigmas (dict) and/or prior.covariance_file
-(npz with `cov`[, `order`]); missing one is derived from the other, with
+(npz with `cov` and `order`); missing one is derived from the other, with
 diagonal covariance when only sigmas are given. The box is
 truth +/- prior.box_scale * sigma. HeuristicFisherProvider's widths are
 NOT science-quality -- the box and proposal will be badly scaled.
@@ -45,10 +45,11 @@ class ManualFisherProvider:
         if cov_file is not None:
             with np.load(cov_file) as d:
                 cov = np.asarray(d["cov"], dtype=float)
-                if "order" in d.files and list(d["order"]) != INTRINSIC_ORDER:
+                got = ([str(x) for x in d["order"]]
+                       if "order" in d.files else None)
+                if got != INTRINSIC_ORDER:
                     raise ValueError(
-                        f"covariance_file order {list(d['order'])} != "
-                        f"{INTRINSIC_ORDER}")
+                        f"covariance_file order {got} != {INTRINSIC_ORDER}")
         return cls(sigmas=sigmas, cov=cov)
 
     def compute(self, injection_parameters, *, duration, delta_t, use_gpu=None):

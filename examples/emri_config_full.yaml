@@ -148,7 +148,7 @@ prior:
   #   p: 1.0e-5
   #   e: 1.0e-5
   #   luminosity_distance: 0.05
-  # covariance_file: fisher_cov.npz   # npz with keys: cov (6x6) [, order]
+  # covariance_file: fisher_cov.npz   # npz with keys: cov (6x6), order
 
 # --------------------------------------------------------------------------
 # Per-parameter prior overrides (optional). By default every parameter is
