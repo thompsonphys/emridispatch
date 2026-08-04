@@ -70,8 +70,6 @@ class HeuristicFisherProvider:
 
     name = "heuristic"
 
-    # Relative (mass_1, mass_2, luminosity_distance) and absolute (a, p, e)
-    # 1-sigma scales -- order-of-magnitude EMRI-typical placeholders only.
     REL = {"mass_1": 1e-6, "mass_2": 1e-6, "luminosity_distance": 0.1}
     ABS = {"a": 1e-5, "p": 1e-5, "e": 1e-5}
 
@@ -85,7 +83,7 @@ class HeuristicFisherProvider:
             if p in self.REL:
                 sigmas[p] = abs(float(injection_parameters[p])) * self.REL[p]
                 if sigmas[p] == 0.0:
-                    sigmas[p] = self.ABS.get(p, 1e-5)
+                    sigmas[p] = 1e-5
             else:
                 sigmas[p] = self.ABS[p]
         cov = np.diag([sigmas[p] ** 2 for p in INTRINSIC_ORDER])

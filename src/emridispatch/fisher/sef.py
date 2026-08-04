@@ -1,7 +1,7 @@
 """StableEMRIFisher provider (optional: `pip install emridispatch[fisher]`).
 
-Needs stableemrifisher, few and lisatools/fastlisaresponse only at
-compute() time; the module itself imports clean.
+Needs stableemrifisher, few and lisatools only at compute() time; the
+module itself imports clean.
 """
 
 import logging
@@ -42,7 +42,7 @@ class SEFFisherProvider:
         return FisherResult(sigmas=sigmas, cov=cov, order=order)
 
 
-def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
+def get_parameter_precision(input_parameters, duration, delta_t,
                             use_gpu=None, tdi="2nd generation",
                             foreground=True, channels=None):
     if use_gpu is None:
@@ -58,10 +58,7 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
             pass
 
     try:
-        from few.waveform import (
-            GenerateEMRIWaveform,
-            FastKerrEccentricEquatorialFlux,
-        )
+        from few.waveform import FastKerrEccentricEquatorialFlux
         from stableemrifisher.fisher import StableEMRIFisher
     except ImportError as err:
         raise ImportError(
@@ -71,19 +68,15 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
             "own sigmas/covariance."
         ) from err
 
-    # Waveform params -- match the injection's observation (duration/cadence) so
-    # the Fisher-derived widths correspond to the SAME data the sampler analyses.
     dt = delta_t
     T = duration
     wave_params = few_params(input_parameters)
 
-    waveform_class = FastKerrEccentricEquatorialFlux
     waveform_class_kwargs = {
         "sum_kwargs": {"pad_output": True},
-        "force_backend": force_backend,  # "cpu" or None (GPU auto)
+        "force_backend": force_backend,
     }
-    waveform_generator = GenerateEMRIWaveform
-    waveform_generator_kwargs = {"return_list": False, "frame": "detector"}
+    waveform_generator_kwargs = {"frame": "detector"}
 
     INDEX_LAMBDA = 8
     INDEX_BETA = 7
@@ -104,10 +97,7 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
         ResponseWrapper = None
         ResponseWrapper_kwargs = None
     else:
-        try:
-            from lisatools.response import ResponseWrapper
-        except ModuleNotFoundError:
-            from fastlisaresponse import ResponseWrapper
+        from lisatools.response import ResponseWrapper
         from lisatools.detector import EqualArmlengthOrbits
 
         tdi_kwargs = dict(
@@ -129,12 +119,10 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
             **tdi_kwargs,
         )
 
-    der_order = 4
     Ndelta = 8
     sef = StableEMRIFisher(
-        waveform_class=waveform_class,
+        waveform_class=FastKerrEccentricEquatorialFlux,
         waveform_class_kwargs=waveform_class_kwargs,
-        waveform_generator=waveform_generator,
         waveform_generator_kwargs=waveform_generator_kwargs,
         ResponseWrapper=ResponseWrapper,
         ResponseWrapper_kwargs=ResponseWrapper_kwargs,
@@ -142,11 +130,7 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
         use_gpu=use_gpu,
         T=T,
         dt=dt,
-        der_order=der_order,
-        Ndelta=Ndelta,
-        stability_plot=False,
-        return_derivatives=False,
-        deriv_type="stable",
+        der_order=4,
         **extra_sef_kwargs,
     )
 
@@ -165,8 +149,6 @@ def get_parameter_precision(input_parameters, duration=0.01, delta_t=5.0,
         wave_params,
         param_names=param_names,
         delta_range=delta_range,
-        filename=None,
-        live_dangerously=False,
     )
 
     param_cov = np.linalg.inv(fisher_matrix)

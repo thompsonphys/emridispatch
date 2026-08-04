@@ -6,7 +6,7 @@ fallback). Selected via prior.fisher: auto | sef | manual | none, where
 auto resolves to manual if configured, else sef if importable, else
 heuristic. Providers implement
 
-    compute(injection_parameters, duration=..., delta_t=...,
+    compute(injection_parameters, *, duration, delta_t,
             use_gpu=None) -> FisherResult
 
 carrying diagonal 1-sigma errors and the 6x6 intrinsic covariance in
@@ -14,14 +14,12 @@ linear coords, ordered [mass_1, mass_2, a, p, e, luminosity_distance].
 """
 
 from dataclasses import dataclass
-from types import SimpleNamespace
-from typing import Protocol
 
 import numpy as np
 
 from emridispatch.parameters import INTRINSIC_ORDER
 
-__all__ = ["FisherResult", "FisherProvider", "get_fisher_provider"]
+__all__ = ["FisherResult", "get_fisher_provider"]
 
 
 @dataclass
@@ -40,13 +38,6 @@ class FisherResult:
         missing = [p for p in INTRINSIC_ORDER if p not in self.sigmas]
         if missing:
             raise ValueError(f"FisherResult sigmas missing {missing}")
-
-
-class FisherProvider(Protocol):
-    name: str
-
-    def compute(self, injection_parameters, *, duration, delta_t,
-                use_gpu=None) -> FisherResult: ...
 
 
 def _sef_importable():
@@ -77,7 +68,7 @@ def get_fisher_provider(cfg):
     if kind == "sef":
         from emridispatch.fisher.sef import SEFFisherProvider
 
-        data = getattr(cfg, "data", SimpleNamespace())
+        data = cfg.data
         _channels = getattr(data, "channels", None)
         return SEFFisherProvider(
             tdi=str(getattr(data, "tdi", "2nd generation")),
