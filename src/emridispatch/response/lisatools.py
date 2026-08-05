@@ -18,9 +18,12 @@ from emridispatch.response import InjectionModel
 logger = logging.getLogger(__name__)
 
 
+_MIN_FREQ = 1.0e-5
+
+
 class PSDNullError(RuntimeError):
-    """Injection radiates at a TDI transfer-function null, where the analytic
-    sensitivity is not trustworthy and no notch width recovers the true SNR."""
+    """The notched SNR depends on the notch width, so no notch recovers a
+    trustworthy value."""
 
 
 def _import_lisatools():
@@ -204,7 +207,10 @@ class EMRIInjectionGenerator:
         if not bad.any():
             return None
         idx = np.flatnonzero(bad)
-        groups = np.split(idx, np.flatnonzero(np.diff(idx) > 1) + 1)
+        groups = [g for g in np.split(idx, np.flatnonzero(np.diff(idx) > 1) + 1)
+                  if g[0] != 0]
+        if not groups:
+            return None
         mask = np.zeros(nf, dtype=bool)
         for g in groups:
             a = np.searchsorted(f, f[g[0]] - width, side="left")
@@ -274,10 +280,9 @@ class EMRIInjectionGenerator:
                         factor, 100.0 * drift)
             return
         msg = (
-            f"injection radiates at the {self.tdi} TDI nulls: {factor:g}x notch "
-            f"widening shifts SNR^2 by {100.0 * drift:.1f}% (tol "
-            f"{100.0 * tol:.1f}%). Try `data.tdi: 1st`, or `data.tdi: off`; "
-            f"`data.psd_notch_strict: false` proceeds regardless.")
+            f"psd notch unstable: {factor:g}x widening shifts SNR^2 by "
+            f"{100.0 * drift:.1f}% (tol {100.0 * tol:.1f}%). Try `data.tdi: 1st` "
+            f"or `data.tdi: off`; `data.psd_notch_strict: false` proceeds.")
         if self.psd_notch_strict:
             raise PSDNullError(msg)
         logger.warning("psd notch UNSTABLE (psd_notch_strict=false): %s", msg)
@@ -285,7 +290,7 @@ class EMRIInjectionGenerator:
     def _fd_settings(self, td_settings):
         return self._lt.FDSettings(
             td_settings.N // 2 + 1, 1.0 / (td_settings.N * td_settings.dt),
-            force_backend=td_settings.force_backend)
+            min_freq=_MIN_FREQ, force_backend=td_settings.force_backend)
 
     def _produce_data_residual_array(self, params=None):
         if params is None:
