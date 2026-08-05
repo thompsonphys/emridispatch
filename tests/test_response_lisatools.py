@@ -11,61 +11,94 @@ from emridispatch.response.lisatools import (
     LisatoolsEMRILikelihood, _DirectEMRIWaveform, _build_waveform_and_sens)
 
 
-class _FakeTDIWaveform:
-    def __init__(self, response_kwargs=None, T=None, dt=None):
-        self.response_kwargs = response_kwargs
-        self.T = T
+class _FakeResponseWrapper:
+    def __init__(self, gen, Tobs, dt, **kwargs):
+        self.gen = gen
+        self.Tobs = Tobs
         self.dt = dt
+        self.kwargs = kwargs
+
+
+class _FakeOrbits:
+    pass
 
 
 def _stub_lt():
     return SimpleNamespace(
         sens_table=STUB_TABLE,
-        GenerateEMRIWaveform=lambda *a, **k: ("few_gen", a, k),
-        EMRITDIWaveform=_FakeTDIWaveform,
+        ResponseWrapper=_FakeResponseWrapper,
+        EqualArmlengthOrbits=_FakeOrbits,
     )
+
+
+def _stub_few():
+    return SimpleNamespace(
+        GenerateEMRIWaveform=lambda *a, **k: ("few_gen", a, k))
 
 
 def test_tdi_on_2nd_generation():
     wf, channels, sens = _build_waveform_and_sens(
-        _stub_lt(), "2nd generation", ["A", "E"], 0.3, 10.0)
-    assert isinstance(wf, _FakeTDIWaveform)
-    assert wf.response_kwargs["tdi"] == "2nd generation"
-    assert wf.response_kwargs["tdi_chan"] == "AE"
-    assert wf.T == 0.3 and wf.dt == 10.0
+        _stub_lt(), _stub_few(), "2nd generation", ["A", "E"], 0.3, 10.0)
+    assert isinstance(wf, _FakeResponseWrapper)
+    assert wf.kwargs["tdi"] == "2nd generation"
+    assert wf.kwargs["tdi_chan"] == "AE"
+    assert wf.Tobs == 0.3 and wf.dt == 10.0
     assert channels == ["A", "E"]
     assert sens == ["A2", "E2"]
 
 
+def test_tdi_on_waveform_comes_from_few_with_padded_output():
+    wf, _, _ = _build_waveform_and_sens(
+        _stub_lt(), _stub_few(), "2nd generation", ["A", "E"], 0.3, 10.0)
+    tag, args, kwargs = wf.gen
+    assert args == ("FastKerrEccentricEquatorialFlux",)
+    assert kwargs == {"sum_kwargs": {"pad_output": True}}
+
+
+def test_tdi_on_response_configuration_is_passed_in_full():
+    """Pins what EMRITDIWaveform used to supply implicitly."""
+    wf, _, _ = _build_waveform_and_sens(
+        _stub_lt(), _stub_few(), "2nd generation", ["A", "E", "T"], 1.0, 5.0)
+    assert wf.kwargs["index_lambda"] == 8
+    assert wf.kwargs["index_beta"] == 7
+    assert wf.kwargs["t0"] == 30000.0
+    assert wf.kwargs["order"] == 25
+    assert wf.kwargs["flip_hx"] is True
+    assert wf.kwargs["remove_sky_coords"] is False
+    assert wf.kwargs["is_ecliptic_latitude"] is False
+    assert isinstance(wf.kwargs["orbits"], _FakeOrbits)
+    assert wf.kwargs["tdi_chan"] == "AET"
+
+
 def test_tdi_on_1st_generation_default_channels():
     wf, channels, sens = _build_waveform_and_sens(
-        _stub_lt(), "1st generation", None, 0.3, 10.0)
+        _stub_lt(), _stub_few(), "1st generation", None, 0.3, 10.0)
     assert channels == ["A", "E"]
     assert sens == ["A1", "E1"]
-    assert wf.response_kwargs["tdi"] == "1st generation"
+    assert wf.kwargs["tdi"] == "1st generation"
 
 
 def test_tdi_on_unknown_channel_raises():
     with pytest.raises(ValueError, match="unknown TDI channel"):
         _build_waveform_and_sens(
-            _stub_lt(), "2nd generation", ["A", "Q"], 0.3, 10.0)
+            _stub_lt(), _stub_few(), "2nd generation", ["A", "Q"], 0.3, 10.0)
 
 
 def test_tdi_unknown_generation_raises():
     with pytest.raises(ValueError, match="unknown TDI generation"):
         _build_waveform_and_sens(
-            _stub_lt(), "3rd generation", ["A", "E"], 0.3, 10.0)
+            _stub_lt(), _stub_few(), "3rd generation", ["A", "E"], 0.3, 10.0)
 
 
 def test_tdi_unknown_generation_lists_choices():
     with pytest.raises(ValueError, match="1st generation.*2nd generation"):
         _build_waveform_and_sens(
-            _stub_lt(), "3rd generation", None, 0.3, 10.0)
+            _stub_lt(), _stub_few(), "3rd generation", None, 0.3, 10.0)
 
 
 def test_tdi_off_direct_waveform():
     wf, channels, sens = _build_waveform_and_sens(
-        _stub_lt(), "off", ["A", "E"], 0.3, 10.0)
+        _stub_lt(), _stub_few(), "off", ["A", "E"], 0.3, 10.0)
     assert isinstance(wf, _DirectEMRIWaveform)
     assert channels == ["I", "II"]
     assert sens == ["LISASens", "LISASens"]

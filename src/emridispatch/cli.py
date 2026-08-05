@@ -7,9 +7,9 @@ import os
 def set_env_guards():
     """Force single-threaded BLAS/OMP env vars and disable breakpoint().
 
-    Must run before numpy import to take effect. Neutralizes lisatools'
-    bare breakpoint() in EMRITDIWaveform's except block so a waveform
-    failure can't drop a non-interactive run into pdb.
+    Must run before numpy import to take effect. Neutralizes FEW's bare
+    breakpoint() calls in the trajectory integrator and mode selector so a
+    waveform failure can't drop a non-interactive run into pdb.
     """
     for _v in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
                "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):

@@ -30,28 +30,38 @@ def _import_lisatools():
         from lisatools.sensitivity import SensitivityMatrix
         from lisatools.analysiscontainer import AnalysisContainer
         from lisatools.diagnostic import inner_product, noise_likelihood_term
-        from lisatools.sources.emri import EMRITDIWaveform
-        from few.waveform.waveform import GenerateEMRIWaveform
+        from lisatools.response import ResponseWrapper
+        from lisatools.detector import EqualArmlengthOrbits
 
         sens_table = load_sensitivity_table()
     except ImportError as err:
         raise ImportError(
-            "lisa-analysis-tools (and FastEMRIWaveforms) are required for the "
-            "'lisatools' response model. Install with "
-            "`pip install emridispatch[lisatools]`."
+            "lisa-analysis-tools is required for the 'lisatools' response "
+            "model. Install with `pip install emridispatch[lisatools]`."
         ) from err
     return SimpleNamespace(
         DataResidualArray=DataResidualArray,
         TDSettings=TDSettings,
         FDSettings=FDSettings,
         SensitivityMatrix=SensitivityMatrix,
-        GenerateEMRIWaveform=GenerateEMRIWaveform,
         AnalysisContainer=AnalysisContainer,
         inner_product=inner_product,
         noise_likelihood_term=noise_likelihood_term,
-        EMRITDIWaveform=EMRITDIWaveform,
+        ResponseWrapper=ResponseWrapper,
+        EqualArmlengthOrbits=EqualArmlengthOrbits,
         sens_table=sens_table,
     )
+
+
+def _import_few():
+    try:
+        from few.waveform.waveform import GenerateEMRIWaveform
+    except ImportError as err:
+        raise ImportError(
+            "FastEMRIWaveforms is required for the 'lisatools' response "
+            "model. Install with `pip install emridispatch[lisatools]`."
+        ) from err
+    return SimpleNamespace(GenerateEMRIWaveform=GenerateEMRIWaveform)
 
 
 class _DirectEMRIWaveform:
@@ -65,11 +75,11 @@ class _DirectEMRIWaveform:
         return [h.real, -h.imag]
 
 
-def _build_waveform_and_sens(lt, tdi, channel_list, duration, delta_t):
+def _build_waveform_and_sens(lt, few, tdi, channel_list, duration, delta_t):
     if tdi == "off":
         if channel_list is not None:
             logger.info("tdi off: ignoring data.channels %s", channel_list)
-        gen = lt.GenerateEMRIWaveform(
+        gen = few.GenerateEMRIWaveform(
             "FastKerrEccentricEquatorialFlux",
             sum_kwargs=dict(pad_output=True), return_list=False,
             frame="detector")
@@ -77,10 +87,13 @@ def _build_waveform_and_sens(lt, tdi, channel_list, duration, delta_t):
         return _DirectEMRIWaveform(gen, duration, delta_t), channels, sens
 
     sens, channels = sensitivity_spec(tdi, channel_list, lt.sens_table)
-    wf = lt.EMRITDIWaveform(
-        response_kwargs=dict(
-            t0=30000.0, tdi=tdi, tdi_chan="".join(channels)),
-        T=duration, dt=delta_t)
+    gen = few.GenerateEMRIWaveform(
+        "FastKerrEccentricEquatorialFlux", sum_kwargs=dict(pad_output=True))
+    wf = lt.ResponseWrapper(
+        gen, duration, delta_t, index_lambda=8, index_beta=7,
+        t0=30000.0, flip_hx=True, remove_sky_coords=False,
+        is_ecliptic_latitude=False, order=25, tdi=tdi,
+        tdi_chan="".join(channels), orbits=lt.EqualArmlengthOrbits())
     return wf, channels, sens
 
 
@@ -103,6 +116,7 @@ class EMRIInjectionGenerator:
         psd_notch_strict=True,
     ):
         self._lt = _import_lisatools()
+        self._few = _import_few()
 
         self.injection_parameters = injection_parameters
         self.injection_snr = injection_snr
@@ -122,7 +136,8 @@ class EMRIInjectionGenerator:
 
         self.waveform_generator, self.channel_list, self.sensetivity_list = (
             _build_waveform_and_sens(
-                self._lt, self.tdi, channel_list, self.duration, self.delta_t))
+                self._lt, self._few, self.tdi, channel_list, self.duration,
+                self.delta_t))
         self.channel_string = "".join(self.channel_list)
 
         if self.tdi == "off":
@@ -130,7 +145,7 @@ class EMRIInjectionGenerator:
                 "tdi: off (direct channels %s, sky-averaged LISASens)",
                 ", ".join(self.channel_list))
         else:
-            _response = self.waveform_generator.response
+            _response = self.waveform_generator
             logger.info(
                 "backends: response=%s tdi=%s few=%s",
                 _response.backend.name,
