@@ -133,7 +133,7 @@ class EMRIInjectionGenerator:
         self._psd_notch_mask = None
         self._notch_drift = None
 
-        self.waveform_generator, self.channel_list, self.sensetivity_list = (
+        self.waveform_generator, self.channel_list, self.sensitivity_list = (
             _build_waveform_and_sens(
                 self._lt, self._few, self.tdi, channel_list, self.duration,
                 self.delta_t))
@@ -153,11 +153,11 @@ class EMRIInjectionGenerator:
 
         self._build_injection()
 
-        self._noise_term = self._lt.noise_likelihood_term(self.sensetivity_matrix)
+        self._noise_term = self._lt.noise_likelihood_term(self.sensitivity_matrix)
         self._d_d = self._lt.inner_product(
             self.data_residual_array,
             self.data_residual_array,
-            psd=self.sensetivity_matrix,
+            psd=self.sensitivity_matrix,
             normalize=False,
         )
         self._lnlike_const = self._noise_term - 0.5 * self._d_d
@@ -223,7 +223,7 @@ class EMRIInjectionGenerator:
         return mask
 
     def _apply_psd_notch(self, data):
-        sens = self.sensetivity_matrix
+        sens = self.sensitivity_matrix
         mask = self._psd_null_mask(data.settings.f_arr, sens.sens_mat)
         if mask is None:
             return
@@ -241,7 +241,7 @@ class EMRIInjectionGenerator:
 
     def _check_notch_stability(self, data, mask, factor=10.0, tol=0.01):
         wide = self._psd_null_mask(
-            data.settings.f_arr, self.sensetivity_matrix.sens_mat,
+            data.settings.f_arr, self.sensitivity_matrix.sens_mat,
             _width=self.psd_notch * factor)
         if wide is None:
             return
@@ -252,7 +252,7 @@ class EMRIInjectionGenerator:
             xp = _cp.get_array_module(d)
         except ImportError:
             xp = np
-        S = self.sensetivity_matrix.sens_mat
+        S = self.sensitivity_matrix.sens_mat
         good = xp.isfinite(S) & (S > 0)
         power = xp.where(good, xp.abs(d) ** 2 / xp.where(good, S, 1.0), 0.0)
         keep_n = ~xp.asarray(mask)
@@ -306,15 +306,15 @@ class EMRIInjectionGenerator:
 
     def _build_injection(self):
         uncalibrated = self._produce_data_residual_array()
-        self.sensetivity_matrix = self._lt.SensitivityMatrix(
+        self.sensitivity_matrix = self._lt.SensitivityMatrix(
             uncalibrated.settings,
-            self.sensetivity_list,
+            self.sensitivity_list,
             **noise_sens_kwargs(self.duration, self.foreground),
         )
         self._apply_psd_notch(uncalibrated)
         container = self._lt.AnalysisContainer(
             uncalibrated,
-            self.sensetivity_matrix,
+            self.sensitivity_matrix,
             signal_gen=self.waveform_generator,
         )
 
@@ -333,7 +333,7 @@ class EMRIInjectionGenerator:
 
             self.analysis_container = self._lt.AnalysisContainer(
                 self.data_residual_array,
-                self.sensetivity_matrix,
+                self.sensitivity_matrix,
                 signal_gen=self.waveform_generator,
             )
             assert np.isclose(self.injection_snr, self.analysis_container.snr())
@@ -354,7 +354,7 @@ class EMRIInjectionGenerator:
         """
         fd = self.data_residual_array.data_res_arr  # FDSignal
         xp = fd.xp
-        _sens_mat = self.sensetivity_matrix.sens_mat
+        _sens_mat = self.sensitivity_matrix.sens_mat
         S = (_sens_mat.get() if hasattr(_sens_mat, "get")
              else np.asarray(_sens_mat))                   # (nchan, nf), host
         nchan, nf = S.shape
@@ -374,7 +374,7 @@ class EMRIInjectionGenerator:
         # Rebuild the container so anything derived from the data sees the noise.
         self.analysis_container = self._lt.AnalysisContainer(
             self.data_residual_array,
-            self.sensetivity_matrix,
+            self.sensitivity_matrix,
             signal_gen=self.waveform_generator,
         )
         logger.info("noise: added PSD realization (seed=%s, %d/%d bins)",
@@ -412,11 +412,11 @@ class EMRIInjectionGenerator:
 
         d_h = self._lt.inner_product(
             self.data_residual_array, sig_dat_array,
-            psd=self.sensetivity_matrix, normalize=False,
+            psd=self.sensitivity_matrix, normalize=False,
         )
         h_h = self._lt.inner_product(
             sig_dat_array, sig_dat_array,
-            psd=self.sensetivity_matrix, normalize=False,
+            psd=self.sensitivity_matrix, normalize=False,
         )
         varying_term = d_h - 0.5 * h_h
         if full:

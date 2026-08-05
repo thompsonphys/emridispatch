@@ -83,7 +83,7 @@ def load(config_path):
 _CAPABILITY = {
     "generate_signal": "signal generator",
     "analysis_container": "analysis container",
-    "sensetivity_matrix": "sensitivity matrix",
+    "sensitivity_matrix": "sensitivity matrix",
     "generate_time_domain": "time-domain generator",
     "channel_list": "channel list",
 }
@@ -176,7 +176,7 @@ def _as_template(model, target):
 
 def _channel_inner(model, a, b):
     """Per-channel <a|b>, reproducing diagnostic.inner_product for a diagonal PSD."""
-    sens = model.sensetivity_matrix
+    sens = model.sensitivity_matrix
     inv = _host(sens.invC)
     differential = sens.differential_component
     arr_a, arr_b = _arr(a), _arr(b)
@@ -202,7 +202,7 @@ def snr(model, target, phase_maximize=False, per_channel=False):
     if not per_channel:
         return result
 
-    _require(model, "sensetivity_matrix", "snr")
+    _require(model, "sensitivity_matrix", "snr")
     _require(model, "channel_list", "snr")
     h_h = _channel_inner(model, template, template)
     d_h = _channel_inner(model, model.data_residual_array, template)
@@ -218,7 +218,7 @@ def snr(model, target, phase_maximize=False, per_channel=False):
 
 def overlap(model, target, phase_maximize=False):
     """Normalised <d|h>/sqrt(<d|d><h|h>). Mismatch is 1 - this."""
-    _require(model, "sensetivity_matrix", "overlap")
+    _require(model, "sensitivity_matrix", "overlap")
     template = _as_template(model, target)
     data = model.data_residual_array
     d_h = float(np.sum(_channel_inner(model, data, template)))

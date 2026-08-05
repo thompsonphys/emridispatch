@@ -116,11 +116,11 @@ class StubModel:
         self.duration = 0.3
         self.injection_parameters = {"x": 1.0, "phi_theta": 0.5}
         sens = np.abs(rng.standard_normal((NCHAN, NF))) + 1.0
-        self.sensetivity_matrix = _Sens(sens, DF)
+        self.sensitivity_matrix = _Sens(sens, DF)
         data = rng.standard_normal((NCHAN, NF)) + 1j * rng.standard_normal((NCHAN, NF))
         self.data_residual_array = _Domain(data, f_arr, DF, n_time=N_TIME)
         self.analysis_container = _Container(self.data_residual_array,
-                                             self.sensetivity_matrix)
+                                             self.sensitivity_matrix)
         self._templates = {}
         self._rng = rng
         self.calls = 0
@@ -155,7 +155,7 @@ class StubModel:
     def evaluate_likelihood(self, payload, full=False):
         template = (self.generate_signal(payload) if isinstance(payload, dict)
                     else payload)
-        inv = self.sensetivity_matrix.invC
+        inv = self.sensitivity_matrix.invC
         d_h = _inner(self.data_residual_array, template, inv, DF)
         h_h = _inner(template, template, inv, DF)
         varying = d_h - 0.5 * h_h

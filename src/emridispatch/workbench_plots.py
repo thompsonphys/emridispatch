@@ -265,12 +265,12 @@ def plot_char_strain(model, params=None, *, show=("template",), show_notch=True,
                      ax=None, **kwargs):
     """f|h(f)| against the sensitivity curve, per channel."""
     plt = _require_plotting()
-    _require(model, "sensetivity_matrix", "plot_char_strain")
+    _require(model, "sensitivity_matrix", "plot_char_strain")
     _require(model, "channel_list", "plot_char_strain")
     names = _check_traces(model, show)
     spectra = _spectra(model, params, names)
     f = _f_arr(model.data_residual_array)
-    sens = np.asarray(_host(model.sensetivity_matrix.sens_mat))
+    sens = np.asarray(_host(model.sensitivity_matrix.sens_mat))
     bands = _notch_bands(model, show_notch)
 
     fig, axes = _axes(plt, ax, len(model.channel_list))
@@ -295,10 +295,10 @@ def plot_snr_accumulation(model, params=None, *, show=("template",),
     "noise" accumulate the detected statistic and can decrease or go negative.
     """
     plt = _require_plotting()
-    _require(model, "sensetivity_matrix", "plot_snr_accumulation")
+    _require(model, "sensitivity_matrix", "plot_snr_accumulation")
     names = _check_traces(model, show)
-    inv = np.asarray(_host(model.sensetivity_matrix.invC))
-    differential = model.sensetivity_matrix.differential_component
+    inv = np.asarray(_host(model.sensitivity_matrix.invC))
+    differential = model.sensitivity_matrix.differential_component
     f = _f_arr(model.data_residual_array)
 
     h = None
@@ -355,8 +355,8 @@ def plot_time_domain(model, params=None, *, show=("template",), residual=False,
         series["template"] = data_td - series["template"]
 
     if whiten:
-        _require(model, "sensetivity_matrix", "plot_time_domain")
-        sens = np.asarray(_host(model.sensetivity_matrix.sens_mat))
+        _require(model, "sensitivity_matrix", "plot_time_domain")
+        sens = np.asarray(_host(model.sensitivity_matrix.sens_mat))
         scale = np.sqrt(np.where(np.isfinite(sens) & (sens > 0), sens, np.inf))
         whitened = {}
         for trace, strain in series.items():

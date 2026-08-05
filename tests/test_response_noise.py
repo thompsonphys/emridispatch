@@ -37,7 +37,7 @@ def _make_generator(force_backend, seed=3):
 
     gen = object.__new__(EMRIInjectionGenerator)
     gen.data_residual_array = dra
-    gen.sensetivity_matrix = sens
+    gen.sensitivity_matrix = sens
     gen.noise_seed = seed
     gen.waveform_generator = None
 
@@ -83,7 +83,7 @@ def test_add_noise_realization_is_seeded(force_backend):
 @pytest.mark.parametrize("force_backend", BACKENDS)
 def test_add_noise_realization_leaves_bad_psd_bins_untouched(force_backend):
     gen = _make_generator(force_backend)
-    S = _host(gen.sensetivity_matrix.sens_mat)
+    S = _host(gen.sensitivity_matrix.sens_mat)
     bad = ~(np.isfinite(S).all(axis=0) & (S > 0).all(axis=0))
     assert bad.any()
 
@@ -99,7 +99,7 @@ def test_add_noise_realization_amplitude_matches_psd(force_backend):
     before = _data(gen).copy()
     gen._add_noise_realization()
 
-    S = _host(gen.sensetivity_matrix.sens_mat)
+    S = _host(gen.sensitivity_matrix.sens_mat)
     good = np.isfinite(S).all(axis=0) & (S > 0).all(axis=0)
     T = 1.0 / float(gen.data_residual_array.data_res_arr.df)
 

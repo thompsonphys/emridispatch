@@ -205,12 +205,12 @@ def test_snr_hand_computed():
 
     model = StubModel()
     ones = np.ones((2, 4), dtype=complex)
-    model.sensetivity_matrix.sens_mat = np.ones((2, 4))
-    model.sensetivity_matrix.invC = np.ones((2, 4))
-    model.sensetivity_matrix.differential_component = 1.0
+    model.sensitivity_matrix.sens_mat = np.ones((2, 4))
+    model.sensitivity_matrix.invC = np.ones((2, 4))
+    model.sensitivity_matrix.differential_component = 1.0
     model.data_residual_array = _Domain(ones, np.arange(4) * 1.0, 1.0)
     model.analysis_container._data = model.data_residual_array
-    model.analysis_container._sens = model.sensetivity_matrix
+    model.analysis_container._sens = model.sensitivity_matrix
 
     result = snr(model, _Domain(ones, np.arange(4) * 1.0, 1.0), per_channel=True)
 
