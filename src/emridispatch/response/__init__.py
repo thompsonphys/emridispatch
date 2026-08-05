@@ -34,11 +34,6 @@ class InjectionModel(ABC):
         Must return a plain float, -inf on any waveform failure.
         """
 
-    @classmethod
-    def from_config(cls, cfg):
-        """Default factory; override for custom construction."""
-        return cls(cfg)
-
 
 # name -> "module.path:ClassName". Values imported lazily so optional heavy
 # dependencies (lisatools/FEW) are only touched when actually selected.
