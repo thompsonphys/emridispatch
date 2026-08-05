@@ -196,6 +196,7 @@ def build_problem(cfg, resume=True):
 
     meta = dict(reparam_mode=reparam_mode, box_scale=box_scale,
                 optimal_snr=model.optimal_snr,
+                notch_drift=getattr(model, "_notch_drift", None),
                 response=str(getattr(cfg.data, "response", "lisatools")),
                 add_noise=bool(getattr(cfg.data, "add_noise", False)),
                 noise_seed=int(getattr(cfg.data, "noise_seed", 0)))

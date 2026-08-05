@@ -107,7 +107,6 @@ class EMRIInjectionGenerator:
         channel_list=None,
         tdi="2nd generation",
         foreground=True,
-        full_likelihood=False,
         add_noise=False,
         noise_seed=0,
         pad_fft=True,
@@ -124,7 +123,6 @@ class EMRIInjectionGenerator:
         self.duration = duration
         self.add_noise = add_noise
         self.noise_seed = noise_seed
-        self.full_likelihood = full_likelihood
         self.tdi = tdi
         self.foreground = foreground
         self.pad_fft = pad_fft
@@ -133,12 +131,12 @@ class EMRIInjectionGenerator:
         self.psd_notch_depth = float(psd_notch_depth)
         self.psd_notch_strict = bool(psd_notch_strict)
         self._psd_notch_mask = None
+        self._notch_drift = None
 
         self.waveform_generator, self.channel_list, self.sensetivity_list = (
             _build_waveform_and_sens(
                 self._lt, self._few, self.tdi, channel_list, self.duration,
                 self.delta_t))
-        self.channel_string = "".join(self.channel_list)
 
         if self.tdi == "off":
             logger.info(
@@ -399,16 +397,12 @@ class EMRIInjectionGenerator:
         times = np.arange(strain.shape[-1]) * self.delta_t
         return times, strain
 
-    def evaluate_likelihood(self, input, full=None):
+    def evaluate_likelihood(self, input, full=False):
         """Log-likelihood for a template.
 
-        Default (full=None -> self.full_likelihood) returns only
-        <d|h> - 0.5<h|h>. full=True returns the absolute
-        ln L = noise + (-0.5)(<d|d> + <h|h> - 2<d|h>).
+        Default returns only <d|h> - 0.5<h|h>. full=True returns the
+        absolute ln L = noise + (-0.5)(<d|d> + <h|h> - 2<d|h>).
         """
-        if full is None:
-            full = self.full_likelihood
-
         if isinstance(input, dict):
             sig_dat_array = self.generate_signal(input)
         elif isinstance(input, self._lt.DataResidualArray):
@@ -436,16 +430,15 @@ class LisatoolsEMRILikelihood(EMRIInjectionGenerator, InjectionModel):
 
     log_lnlike_failures = False
 
-    def __init__(self, injection_parameters, vectorized=False, **kwargs):
+    def __init__(self, injection_parameters, **kwargs):
         super().__init__(injection_parameters, **kwargs)
-        self.vectorized = vectorized
         self.lnlike_failures = {}
 
     @classmethod
     def from_config(cls, cfg):
         _channels = getattr(cfg.data, "channels", None)
         return cls(
-            dict(cfg.injection), vectorized=False,
+            dict(cfg.injection),
             duration=cfg.data.duration, delta_t=cfg.data.delta_t,
             injection_snr=cfg.data.inj_snr,
             channel_list=None if _channels is None else list(_channels),
