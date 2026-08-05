@@ -66,7 +66,7 @@ DATA_DEFAULTS = {
     "psd_notch": 1.0e-5,
     "psd_notch_depth": 2.0,
     "psd_notch_strict": True,
-    "toy_sigma_scale": 1.0,
+    "toy_sigma_scale": 0.05,
 }
 
 

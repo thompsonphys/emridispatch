@@ -436,20 +436,20 @@ class LisatoolsEMRILikelihood(EMRIInjectionGenerator, InjectionModel):
 
     @classmethod
     def from_config(cls, cfg):
-        _channels = getattr(cfg.data, "channels", None)
+        _channels = cfg.data.channels
         return cls(
             dict(cfg.injection),
             duration=cfg.data.duration, delta_t=cfg.data.delta_t,
             injection_snr=cfg.data.inj_snr,
             channel_list=None if _channels is None else list(_channels),
-            tdi=str(getattr(cfg.data, "tdi", "2nd generation")),
-            foreground=bool(getattr(cfg.data, "foreground", True)),
-            add_noise=bool(getattr(cfg.data, "add_noise", False)),
-            noise_seed=int(getattr(cfg.data, "noise_seed", 0)),
-            pad_fft=bool(getattr(cfg.data, "pad_fft", True)),
-            psd_notch=float(getattr(cfg.data, "psd_notch", 1e-5)),
-            psd_notch_depth=float(getattr(cfg.data, "psd_notch_depth", 2.0)),
-            psd_notch_strict=bool(getattr(cfg.data, "psd_notch_strict", True)),
+            tdi=str(cfg.data.tdi),
+            foreground=bool(cfg.data.foreground),
+            add_noise=bool(cfg.data.add_noise),
+            noise_seed=int(cfg.data.noise_seed),
+            pad_fft=bool(cfg.data.pad_fft),
+            psd_notch=float(cfg.data.psd_notch),
+            psd_notch_depth=float(cfg.data.psd_notch_depth),
+            psd_notch_strict=bool(cfg.data.psd_notch_strict),
         )
 
     def __call__(self, params):

@@ -28,8 +28,8 @@ class ToyGaussianLikelihood(InjectionModel):
     def from_config(cls, cfg):
         return cls(
             dict(cfg.injection),
-            sigma_scale=float(getattr(cfg.data, "toy_sigma_scale", 0.05)),
-            snr=float(getattr(cfg.data, "inj_snr", None) or 0.0),
+            sigma_scale=float(cfg.data.toy_sigma_scale),
+            snr=float(cfg.data.inj_snr or 0.0),
         )
 
     def evaluate_likelihood(self, template_params) -> float:

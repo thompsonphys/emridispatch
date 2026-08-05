@@ -184,11 +184,13 @@ def bench_duration(duration, delta_t, repeat, with_cpu_waveform):
 
     from types import SimpleNamespace
 
+    from emridispatch.config import DATA_DEFAULTS
+
     cfg = SimpleNamespace(
         injection=dict(INJECTION),
-        data=SimpleNamespace(duration=duration, delta_t=delta_t, inj_snr=30.0,
-                             channels=["A", "E"], tdi="2nd generation",
-                             foreground=True, add_noise=False, noise_seed=0))
+        data=SimpleNamespace(**dict(
+            DATA_DEFAULTS, duration=duration, delta_t=delta_t, inj_snr=30.0,
+            channels=["A", "E"], tdi="2nd generation")))
     t0 = time.perf_counter()
     like = LisatoolsEMRILikelihood.from_config(cfg)
     result["build_injection"] = time.perf_counter() - t0

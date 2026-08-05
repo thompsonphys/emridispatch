@@ -332,7 +332,7 @@ def _box_from_config(cfg, reparam_idx, box_scale, allow_fisher, model=None):
 
     if model is not None:
         injection_parameters = model.injection_parameters
-    elif getattr(cfg.data, "inj_snr", None) is None:
+    elif cfg.data.inj_snr is None:
         injection_parameters = dict(cfg.injection)
     else:
         from emridispatch.response import build_injection_model

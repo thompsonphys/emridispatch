@@ -71,7 +71,7 @@ def log_versions(cfg):
     backend = str(cfg.sampler.backend)
     logger.info("versions: sampler backend %r: %s",
                 backend, fmt(_BACKEND_DISTS.get(backend, [backend])))
-    response = str(getattr(cfg.data, "response", "lisatools"))
+    response = str(cfg.data.response)
     logger.info("versions: response %r: %s",
                 response, fmt(_RESPONSE_DISTS.get(response, [response])))
     fisher = str(cfg.prior.fisher).lower()
@@ -105,10 +105,10 @@ def _write_injection_truth(outdir, inj_params, truth_vec):
 
 
 def fisher_key_from_config(cfg):
-    channels = getattr(cfg.data, "channels", None)
+    channels = cfg.data.channels
     return fisher_cache_key(
-        str(getattr(cfg.data, "tdi", "2nd generation")),
-        bool(getattr(cfg.data, "foreground", True)),
+        str(cfg.data.tdi),
+        bool(cfg.data.foreground),
         cfg.data.duration, cfg.data.delta_t,
         None if channels is None else list(channels),
     ) + f"|provider={get_fisher_provider(cfg).name}"
@@ -197,9 +197,9 @@ def build_problem(cfg, resume=True):
     meta = dict(reparam_mode=reparam_mode, box_scale=box_scale,
                 optimal_snr=model.optimal_snr,
                 notch_drift=getattr(model, "_notch_drift", None),
-                response=str(getattr(cfg.data, "response", "lisatools")),
-                add_noise=bool(getattr(cfg.data, "add_noise", False)),
-                noise_seed=int(getattr(cfg.data, "noise_seed", 0)))
+                response=str(cfg.data.response),
+                add_noise=bool(cfg.data.add_noise),
+                noise_seed=int(cfg.data.noise_seed))
 
     return SamplingProblem(
         ndim=ndim, param_names=list(PARAM_NAMES),

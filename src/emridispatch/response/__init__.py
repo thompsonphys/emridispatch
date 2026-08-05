@@ -50,7 +50,7 @@ def register_model(name, target):
 
 def build_injection_model(cfg):
     """Instantiate the model selected by cfg.data.response."""
-    name = str(getattr(cfg.data, "response", "lisatools"))
+    name = str(cfg.data.response)
     if name not in _REGISTRY:
         raise ValueError(
             f"unknown data.response {name!r}; registered: {sorted(_REGISTRY)}")
