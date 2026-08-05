@@ -117,7 +117,7 @@ class EMRIInjectionGenerator:
         self._lt = _import_lisatools()
         self._few = _import_few()
 
-        self.injection_parameters = injection_parameters
+        self.injection_parameters = dict(injection_parameters)
         self.injection_snr = injection_snr
         self.delta_t = delta_t
         self.duration = duration
@@ -222,10 +222,9 @@ class EMRIInjectionGenerator:
                 self.psd_notch_depth)
         return mask
 
-    def _apply_psd_notch(self):
+    def _apply_psd_notch(self, data):
         sens = self.sensetivity_matrix
-        mask = self._psd_null_mask(
-            self._data_residual_array.settings.f_arr, sens.sens_mat)
+        mask = self._psd_null_mask(data.settings.f_arr, sens.sens_mat)
         if mask is None:
             return
         invC = sens.invC
@@ -238,16 +237,15 @@ class EMRIInjectionGenerator:
         invC[..., xp.asarray(mask)] = 0.0
         sens.invC = invC
         self._psd_notch_mask = mask
-        self._check_notch_stability(mask)
+        self._check_notch_stability(data, mask)
 
-    def _check_notch_stability(self, mask, factor=10.0, tol=0.01):
+    def _check_notch_stability(self, data, mask, factor=10.0, tol=0.01):
         wide = self._psd_null_mask(
-            self._data_residual_array.settings.f_arr,
-            self.sensetivity_matrix.sens_mat,
+            data.settings.f_arr, self.sensetivity_matrix.sens_mat,
             _width=self.psd_notch * factor)
         if wide is None:
             return
-        d = self._data_residual_array.data_res_arr.arr
+        d = data.data_res_arr.arr
         try:
             import cupy as _cp
 
@@ -307,15 +305,15 @@ class EMRIInjectionGenerator:
             signal_domain=self._fd_settings(td_settings))
 
     def _build_injection(self):
-        self._data_residual_array = self._produce_data_residual_array()
+        uncalibrated = self._produce_data_residual_array()
         self.sensetivity_matrix = self._lt.SensitivityMatrix(
-            self._data_residual_array.settings,
+            uncalibrated.settings,
             self.sensetivity_list,
             **noise_sens_kwargs(self.duration, self.foreground),
         )
-        self._apply_psd_notch()
-        self._analysis_container = self._lt.AnalysisContainer(
-            self._data_residual_array,
+        self._apply_psd_notch(uncalibrated)
+        container = self._lt.AnalysisContainer(
+            uncalibrated,
             self.sensetivity_matrix,
             signal_gen=self.waveform_generator,
         )
@@ -323,14 +321,14 @@ class EMRIInjectionGenerator:
         # rescale distance to get injection SNR
         if self.injection_snr is not None:
             self.injection_parameters["luminosity_distance"] /= (
-                self.injection_snr / self._analysis_container.snr()
+                self.injection_snr / container.snr()
             )
 
             self.data_residual_array = self._produce_data_residual_array()
 
             assert np.all(
                 self.data_residual_array.settings.f_arr
-                == self._data_residual_array.settings.f_arr
+                == uncalibrated.settings.f_arr
             )
 
             self.analysis_container = self._lt.AnalysisContainer(
@@ -340,8 +338,8 @@ class EMRIInjectionGenerator:
             )
             assert np.isclose(self.injection_snr, self.analysis_container.snr())
         else:
-            self.data_residual_array = self._data_residual_array
-            self.analysis_container = self._analysis_container
+            self.data_residual_array = uncalibrated
+            self.analysis_container = container
 
         self.optimal_snr = float(np.real(self.analysis_container.snr()))
 
@@ -397,18 +395,20 @@ class EMRIInjectionGenerator:
         times = np.arange(strain.shape[-1]) * self.delta_t
         return times, strain
 
-    def evaluate_likelihood(self, input, full=False):
+    def evaluate_likelihood(self, template_params, full=False):
         """Log-likelihood for a template.
 
         Default returns only <d|h> - 0.5<h|h>. full=True returns the
         absolute ln L = noise + (-0.5)(<d|d> + <h|h> - 2<d|h>).
         """
-        if isinstance(input, dict):
-            sig_dat_array = self.generate_signal(input)
-        elif isinstance(input, self._lt.DataResidualArray):
-            sig_dat_array = input
+        if isinstance(template_params, dict):
+            sig_dat_array = self.generate_signal(template_params)
+        elif isinstance(template_params, self._lt.DataResidualArray):
+            sig_dat_array = template_params
         else:
-            raise TypeError("please input a dict of parameters or a DataResidualArray")
+            raise TypeError(
+                f"template_params must be a dict or DataResidualArray, got "
+                f"{type(template_params).__name__}")
 
         d_h = self._lt.inner_product(
             self.data_residual_array, sig_dat_array,
