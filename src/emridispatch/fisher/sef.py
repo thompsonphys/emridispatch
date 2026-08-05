@@ -10,7 +10,7 @@ import numpy as np
 
 from emridispatch.fisher import FisherResult
 from emridispatch.noise import (
-    channel_noise_psd, per_channel_noise_kwargs, sensitivity_spec)
+    MIN_FREQ, channel_noise_psd, per_channel_noise_kwargs, sensitivity_spec)
 from emridispatch.parameters import FEW_TO_INJECTION, few_params
 
 logger = logging.getLogger(__name__)
@@ -24,6 +24,24 @@ def _gpu_available():
         return cupy.cuda.runtime.getDeviceCount() > 0
     except Exception:
         return False
+
+
+class _SharedWaveform:
+    """Callable standing in for a waveform class, returning one shared instance.
+
+    StableEMRIFisher instantiates the waveform class twice -- once for the
+    generator, once for StableEMRIDerivative -- and each copy of the FEW
+    amplitude tables costs ~5 GB of device memory.
+    """
+
+    def __init__(self, waveform_class):
+        self._waveform_class = waveform_class
+        self._instance = None
+
+    def __call__(self, *args, **kwargs):
+        if self._instance is None:
+            self._instance = self._waveform_class(*args, **kwargs)
+        return self._instance
 
 
 class SEFFisherProvider:
@@ -121,7 +139,7 @@ def get_parameter_precision(input_parameters, duration, delta_t,
 
     Ndelta = 8
     sef = StableEMRIFisher(
-        waveform_class=FastKerrEccentricEquatorialFlux,
+        waveform_class=_SharedWaveform(FastKerrEccentricEquatorialFlux),
         waveform_class_kwargs=waveform_class_kwargs,
         waveform_generator_kwargs=waveform_generator_kwargs,
         ResponseWrapper=ResponseWrapper,
@@ -149,6 +167,7 @@ def get_parameter_precision(input_parameters, duration, delta_t,
         wave_params,
         param_names=param_names,
         delta_range=delta_range,
+        fmin=MIN_FREQ,
     )
 
     param_cov = np.linalg.inv(fisher_matrix)

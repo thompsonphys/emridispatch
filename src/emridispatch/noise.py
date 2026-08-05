@@ -1,5 +1,7 @@
 NOISE_MODEL = "scirdv1"
 
+MIN_FREQ = 1.0e-5
+
 DEFAULT_TDI_CHANNELS = ["A", "E"]
 
 DIRECT_CHANNELS = ["I", "II"]

@@ -11,14 +11,11 @@ import numpy as np
 from scipy.fft import next_fast_len
 
 from emridispatch.noise import (
-    load_sensitivity_table, noise_sens_kwargs, sensitivity_spec)
+    MIN_FREQ, load_sensitivity_table, noise_sens_kwargs, sensitivity_spec)
 from emridispatch.parameters import few_params, physical_from_vector
 from emridispatch.response import InjectionModel
 
 logger = logging.getLogger(__name__)
-
-
-_MIN_FREQ = 1.0e-5
 
 
 class PSDNullError(RuntimeError):
@@ -290,7 +287,7 @@ class EMRIInjectionGenerator:
     def _fd_settings(self, td_settings):
         return self._lt.FDSettings(
             td_settings.N // 2 + 1, 1.0 / (td_settings.N * td_settings.dt),
-            min_freq=_MIN_FREQ, force_backend=td_settings.force_backend)
+            min_freq=MIN_FREQ, force_backend=td_settings.force_backend)
 
     def _produce_data_residual_array(self, params=None):
         if params is None:
