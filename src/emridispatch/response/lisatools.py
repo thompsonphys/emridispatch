@@ -138,8 +138,7 @@ class EMRIInjectionGenerator:
                 _response.waveform_gen.waveform_generator.backend.name,
             )
 
-        # Build the injection and calibrate the distance to hit injection_snr.
-        self.emri_injection_generator()
+        self._build_injection()
 
         self._noise_term = self._lt.noise_likelihood_term(self.sensetivity_matrix)
         self._d_d = self._lt.inner_product(
@@ -292,7 +291,7 @@ class EMRIInjectionGenerator:
             channel_strain, input_signal_domain=td_settings,
             signal_domain=self._fd_settings(td_settings))
 
-    def emri_injection_generator(self):
+    def _build_injection(self):
         self._data_residual_array = self._produce_data_residual_array()
         self.sensetivity_matrix = self._lt.SensitivityMatrix(
             self._data_residual_array.settings,
