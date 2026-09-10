@@ -20,7 +20,7 @@ runs:
     - name: Install conda dependencies
       shell: bash -el {0}
       run: |
-        conda install -y -c conda-forge --override-channels cxx-compiler pkgconfig blas-devel "libblas=*=*netlib" "libcblas=*=*netlib" "liblapack=*=*netlib" "liblapacke=*=*netlib"
+        conda install -y -c conda-forge --override-channels cxx-compiler pkgconfig "libblas=*=*netlib" "libcblas=*=*netlib" "liblapack=*=*netlib" "liblapacke=*=*netlib"
 
     - name: Install package
       shell: bash -el {0}

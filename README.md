@@ -18,7 +18,26 @@ spend all of your GPU resources on this).
 
 ## Install
 
-With pip:
+To install this package, we require several build dependencies due to our
+interaction with the `lisaanalysistools` package. Before installing
+`emridispatch` we need to install the following packages,
+
+```
+cxx-compiler
+pkgconfig
+"libblas=*=*netlib"
+"libcblas=*=*netlib"
+"liblapack=*=*netlib"
+"liblapacke=*=*netlib"
+```
+
+This can be done with conda via:
+
+```bash
+conda install -y -c conda-forge --override-channels cxx-compiler pkgconfig blas-devel "libblas=*=*netlib" "libcblas=*=*netlib" "liblapack=*=*netlib" "liblapacke=*=*netlib"
+```
+
+`emridispatch` can then be installed with pip:
 
 ```bash
 pip install -e .                       # core only (numpy/scipy/pyyaml)
@@ -36,6 +55,8 @@ uv venv                                # create .venv (once)
 uv pip install -e .                    # core only
 uv pip install -e ".[all]"             # everything (same extras as above)
 ```
+
+For full installation instructions, see our public documentation.
 
 Everything heavy is optional and imported lazily; a missing extra produces a
 clear install hint at the point of use. If e.g. [impulse-mcmc](https://github.com/AaronDJohnson/impulse_mcmc) / [StableEMRIFisher](https://github.com/perturber/StableEMRIFisher) are
