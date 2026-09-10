@@ -34,7 +34,7 @@ pkgconfig
 This can be done with conda via:
 
 ```bash
-conda install -y -c conda-forge --override-channels cxx-compiler pkgconfig blas-devel "libblas=*=*netlib" "libcblas=*=*netlib" "liblapack=*=*netlib" "liblapacke=*=*netlib"
+conda install -y -c conda-forge --override-channels cxx-compiler pkgconfig "libblas=*=*netlib" "libcblas=*=*netlib" "liblapack=*=*netlib" "liblapacke=*=*netlib"
 ```
 
 `emridispatch` can then be installed with pip:
